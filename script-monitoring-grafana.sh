@@ -172,10 +172,40 @@ configure_ports() {
 open_port() {
     local port=$1
     echo -e "${YELLOW}Opening port $port...${NC}"
+    
+    # Enable UFW if installed but not active
     if command -v ufw &> /dev/null; then
+        if ! sudo ufw status | grep -q "Status: active"; then
+            sudo ufw --force enable
+        fi
+        # Delete any existing rules for this port first
+        sudo ufw delete allow $port/tcp 2>/dev/null
+        # Add new rule
         sudo ufw allow $port/tcp
-    elif command -v iptables &> /dev/null; then
+        echo -e "${GREEN}Port $port opened in UFW${NC}"
+    fi
+    
+    # Configure iptables if UFW is not available
+    if ! command -v ufw &> /dev/null && command -v iptables &> /dev/null; then
+        # Remove any existing rules for this port
+        sudo iptables -D INPUT -p tcp --dport $port -j ACCEPT 2>/dev/null
+        # Add new rule
         sudo iptables -A INPUT -p tcp --dport $port -j ACCEPT
+        echo -e "${GREEN}Port $port opened in iptables${NC}"
+        
+        # Save iptables rules if iptables-persistent is installed
+        if command -v netfilter-persistent &> /dev/null; then
+            sudo netfilter-persistent save
+        fi
+    fi
+    
+    # Verify port is open
+    if command -v netstat &> /dev/null; then
+        if netstat -tuln | grep -q ":$port\b"; then
+            echo -e "${GREEN}Port $port is now listening${NC}"
+        else
+            echo -e "${YELLOW}Warning: Port $port is configured but not listening yet${NC}"
+        fi
     fi
 }
 
@@ -183,16 +213,107 @@ open_port() {
 close_port() {
     local port=$1
     echo -e "${YELLOW}Closing port $port...${NC}"
+    
     if command -v ufw &> /dev/null; then
-        sudo ufw delete allow $port/tcp
-    elif command -v iptables &> /dev/null; then
-        sudo iptables -D INPUT -p tcp --dport $port -j ACCEPT
+        if sudo ufw status | grep -q "$port/tcp"; then
+            sudo ufw delete allow $port/tcp
+            echo -e "${GREEN}Port $port closed in UFW${NC}"
+        fi
     fi
+    
+    if ! command -v ufw &> /dev/null && command -v iptables &> /dev/null; then
+        if sudo iptables -C INPUT -p tcp --dport $port -j ACCEPT 2>/dev/null; then
+            sudo iptables -D INPUT -p tcp --dport $port -j ACCEPT
+            echo -e "${GREEN}Port $port closed in iptables${NC}"
+            
+            # Save iptables rules if iptables-persistent is installed
+            if command -v netfilter-persistent &> /dev/null; then
+                sudo netfilter-persistent save
+            fi
+        fi
+    fi
+    
+    # Verify port is closed
+    if command -v netstat &> /dev/null; then
+        if ! netstat -tuln | grep -q ":$port\b"; then
+            echo -e "${GREEN}Port $port is now closed${NC}"
+        else
+            echo -e "${YELLOW}Warning: Port $port might still be in use${NC}"
+        fi
+    fi
+}
+
+# Function to cleanup component before installation
+cleanup_component() {
+    local component=$1
+    local port=$2
+    echo -e "${YELLOW}Cleaning up old $component installation...${NC}"
+    
+    case $component in
+        "grafana")
+            if dpkg -l | grep -q grafana; then
+                sudo systemctl stop grafana-server || true
+                sudo apt-get remove --purge grafana -y
+                sudo rm -rf /etc/grafana
+                sudo rm -rf /var/lib/grafana
+                close_port $port
+            fi
+            ;;
+        "prometheus")
+            if [ -d "/etc/prometheus" ]; then
+                sudo systemctl stop prometheus || true
+                sudo rm -rf /etc/prometheus
+                sudo rm -rf /var/lib/prometheus
+                sudo rm -f /usr/local/bin/prometheus
+                sudo rm -f /usr/local/bin/promtool
+                sudo userdel prometheus || true
+                close_port $port
+            fi
+            ;;
+        "node_exporter")
+            if [ -f "/usr/local/bin/node_exporter" ]; then
+                sudo systemctl stop node_exporter || true
+                sudo rm -f /usr/local/bin/node_exporter
+                sudo userdel node_exporter || true
+                close_port $port
+            fi
+            ;;
+        "promtail")
+            if [ -f "/usr/local/bin/promtail" ]; then
+                sudo systemctl stop promtail || true
+                sudo rm -rf /etc/promtail
+                sudo rm -f /usr/local/bin/promtail
+                close_port $port
+            fi
+            ;;
+        "loki")
+            if [ -f "/usr/local/bin/loki" ]; then
+                sudo systemctl stop loki || true
+                sudo rm -rf /etc/loki
+                sudo rm -f /usr/local/bin/loki
+                sudo rm -rf /tmp/loki
+                close_port $port
+            fi
+            ;;
+        "nvidia_exporter")
+            if [ -f "/usr/local/bin/dcgm-exporter" ]; then
+                sudo systemctl stop dcgm-exporter || true
+                sudo rm -f /usr/local/bin/dcgm-exporter
+                close_port $port
+            fi
+            ;;
+    esac
+    
+    # Reload systemd after removing services
+    sudo systemctl daemon-reload
 }
 
 # Function to install Grafana
 install_grafana() {
     echo -e "${YELLOW}Installing Grafana...${NC}"
+    
+    # Cleanup old installation
+    cleanup_component "grafana" $GRAFANA_PORT
     
     # Add Grafana GPG key
     wget -q -O - https://packages.grafana.com/gpg.key | sudo apt-key add -
@@ -224,6 +345,9 @@ install_grafana() {
 # Function to install Prometheus
 install_prometheus() {
     echo -e "${YELLOW}Installing Prometheus...${NC}"
+    
+    # Cleanup old installation
+    cleanup_component "prometheus" $PROMETHEUS_PORT
     
     # Create prometheus user
     sudo useradd --no-create-home --shell /bin/false prometheus
@@ -304,6 +428,9 @@ EOF
 install_node_exporter() {
     echo -e "${YELLOW}Installing Node Exporter...${NC}"
     
+    # Cleanup old installation
+    cleanup_component "node_exporter" $NODE_EXPORTER_PORT
+    
     # Create node_exporter user
     sudo useradd --no-create-home --shell /bin/false node_exporter
     
@@ -357,6 +484,9 @@ EOF
 # Function to install Promtail
 install_promtail() {
     echo -e "${YELLOW}Installing Promtail...${NC}"
+    
+    # Cleanup old installation
+    cleanup_component "promtail" $PROMTAIL_PORT
     
     # Download Promtail
     LOKI_VERSION=$(curl -s https://api.github.com/repos/grafana/loki/releases/latest | grep tag_name | cut -d '"' -f 4)
@@ -425,6 +555,9 @@ EOF
 # Function to install Loki
 install_loki() {
     echo -e "${YELLOW}Installing Loki...${NC}"
+    
+    # Cleanup old installation
+    cleanup_component "loki" $LOKI_PORT
     
     # Download Loki
     LOKI_VERSION=$(curl -s https://api.github.com/repos/grafana/loki/releases/latest | grep tag_name | cut -d '"' -f 4)
@@ -512,6 +645,9 @@ EOF
 # Function to install NVIDIA Prometheus Exporter
 install_nvidia_prometheus() {
     echo -e "${YELLOW}Installing NVIDIA Prometheus Exporter...${NC}"
+    
+    # Cleanup old installation
+    cleanup_component "nvidia_exporter" $NVIDIA_EXPORTER_PORT
     
     # Check if NVIDIA drivers are installed
     if ! command -v nvidia-smi &> /dev/null; then
