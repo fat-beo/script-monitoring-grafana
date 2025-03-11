@@ -344,11 +344,30 @@ cleanup_component() {
             fi
             ;;
         "nvidia_exporter")
-            if [ -f "/usr/local/bin/dcgm-exporter" ]; then
+            # Cleanup DCGM Exporter
+            if [ -f "/usr/local/bin/dcgm-exporter" ] || [ -f "/usr/bin/dcgm-exporter" ]; then
                 sudo systemctl stop dcgm-exporter || true
+                sudo systemctl disable dcgm-exporter || true
                 sudo rm -f /usr/local/bin/dcgm-exporter
-                close_port $port
+                sudo rm -f /usr/bin/dcgm-exporter
+                sudo rm -f /etc/systemd/system/dcgm-exporter.service
             fi
+            # Cleanup SMI Exporter
+            if [ -f "/usr/local/bin/nvidia_gpu_exporter" ]; then
+                sudo systemctl stop nvidia-smi-exporter || true
+                sudo systemctl disable nvidia-smi-exporter || true
+                sudo rm -f /usr/local/bin/nvidia_gpu_exporter
+                sudo rm -f /etc/systemd/system/nvidia-smi-exporter.service
+                sudo userdel nvidia-smi-exporter || true
+            fi
+            # Clean up DCGM if installed
+            if dpkg -l | grep -q datacenter-gpu-manager; then
+                sudo apt-get remove --purge datacenter-gpu-manager -y
+            fi
+            if dpkg -l | grep -q nvidia-dcgm; then
+                sudo apt-get remove --purge nvidia-dcgm -y
+            fi
+            close_port $port
             ;;
     esac
     
@@ -522,101 +541,55 @@ configure_grafana_password() {
 install_grafana() {
     echo -e "${YELLOW}Installing Grafana...${NC}"
     
-    # Cleanup old installation
-    cleanup_component "grafana" $GRAFANA_PORT
+    # 1. Cleanup old installation
+    echo -e "\n${YELLOW}Cleaning up old installation...${NC}"
+    cleanup_component "grafana" "$GRAFANA_PORT"
     
-    # Prompt for admin password
-    local password=""
-    local confirm_password=""
-    local max_attempts=3
-    local attempt=1
-    
-    while [ $attempt -le $max_attempts ]; do
-        echo -e "${YELLOW}Set Grafana admin password (attempt $attempt of $max_attempts):${NC}"
-        read -s -p "Enter password (minimum 8 characters): " password
-        echo
-        read -s -p "Confirm password: " confirm_password
-        echo
-        
-        if [ "$password" = "$confirm_password" ]; then
-            if [ ${#password} -lt 8 ]; then
-                echo -e "${RED}Password must be at least 8 characters long.${NC}"
-                attempt=$((attempt + 1))
-                continue
-            fi
-            break
-        else
-            echo -e "${RED}Passwords do not match.${NC}"
-            attempt=$((attempt + 1))
-        fi
-        
-        if [ $attempt -gt $max_attempts ]; then
-            echo -e "${RED}Maximum password attempts reached. Using default password: admin${NC}"
-            password="admin"
-            break
-        fi
-    done
-    
-    # Create temporary grafana.ini with the new password
-    cat << EOF > /tmp/grafana.ini
-[server]
-http_addr = 0.0.0.0
-http_port = ${GRAFANA_PORT}
-
-[security]
-admin_user = admin
-admin_password = ${password}
-
-[log]
-mode = console file
-level = info
-EOF
-    
-    # Download config file first
-    if ! sudo mkdir -p /etc/grafana; then
-        echo -e "${RED}Failed to create Grafana config directory. Installation aborted.${NC}"
-        return 1
+    # 2. Check prerequisites
+    echo -e "\n${YELLOW}Checking prerequisites...${NC}"
+    if ! command -v curl &> /dev/null; then
+        sudo apt-get install -y curl
     fi
     
-    # Move the temporary config file
-    if ! sudo mv /tmp/grafana.ini /etc/grafana/grafana.ini; then
-        echo -e "${RED}Failed to move Grafana configuration. Installation aborted.${NC}"
-        return 1
-    fi
-    
-    # Set correct permissions
-    sudo chown grafana:grafana /etc/grafana/grafana.ini
-    sudo chmod 640 /etc/grafana/grafana.ini
-    
-    # Add Grafana GPG key
+    # 3. Add Grafana repository
+    echo -e "\n${YELLOW}Adding Grafana repository...${NC}"
+    sudo apt-get install -y apt-transport-https software-properties-common
     wget -q -O - https://packages.grafana.com/gpg.key | sudo apt-key add -
-    
-    # Add Grafana repository
     echo "deb https://packages.grafana.com/oss/deb stable main" | sudo tee /etc/apt/sources.list.d/grafana.list
     
-    # Update package list
-    sudo apt update
+    # 4. Install Grafana
+    echo -e "\n${YELLOW}Installing Grafana package...${NC}"
+    sudo apt-get update
+    sudo apt-get install -y grafana
     
-    # Install Grafana
-    if sudo apt install grafana -y; then
-        # Start Grafana service
-        sudo systemctl start grafana-server
-        sudo systemctl enable grafana-server
-        
-        # Wait for Grafana to start
-        echo -e "${YELLOW}Waiting for Grafana to start...${NC}"
-        sleep 10
-        
-        # Open port
-        open_port $GRAFANA_PORT
-        
-        echo -e "${GREEN}Grafana installed successfully!${NC}"
-        echo -e "${YELLOW}You can access Grafana at: http://0.0.0.0:$GRAFANA_PORT${NC}"
-        echo -e "${YELLOW}Username: admin${NC}"
-        echo -e "${YELLOW}Password: $password${NC}"
-        return 0
+    # 5. Create/update configuration
+    echo -e "\n${YELLOW}Configuring Grafana...${NC}"
+    sudo mkdir -p /etc/grafana/provisioning/datasources
+    sudo mkdir -p /etc/grafana/provisioning/dashboards
+    
+    # 6. Create systemd service
+    echo -e "\n${YELLOW}Creating systemd service...${NC}"
+    sudo systemctl daemon-reload
+    
+    # 7. Start and enable service
+    echo -e "\n${YELLOW}Starting Grafana service...${NC}"
+    sudo systemctl start grafana-server
+    sudo systemctl enable grafana-server
+    
+    # 8. Configure firewall
+    echo -e "\n${YELLOW}Configuring firewall...${NC}"
+    open_port "$GRAFANA_PORT"
+    
+    # 9. Check installation
+    echo -e "\n${YELLOW}Checking installation...${NC}"
+    if systemctl is-active --quiet grafana-server; then
+        echo -e "${GREEN}Grafana has been installed successfully!${NC}"
+        echo -e "Access Grafana at: http://localhost:$GRAFANA_PORT"
+        echo -e "Default credentials:"
+        echo -e "Username: admin"
+        echo -e "Password: admin"
     else
-        echo -e "${RED}Failed to install Grafana.${NC}"
+        echo -e "${RED}Failed to install Grafana. Please check the logs.${NC}"
         return 1
     fi
 }
@@ -991,79 +964,54 @@ EOF
 # Function to remove all components
 remove_all_components() {
     echo -e "${YELLOW}Removing all monitoring components...${NC}"
-    local success=true
-
-    # Stop and remove services
-    local services=("grafana-server" "prometheus" "node_exporter" "promtail" "loki" "dcgm-exporter")
-    for service in "${services[@]}"; do
-        if systemctl is-active --quiet $service; then
-            echo -e "Stopping and removing $service..."
-            sudo systemctl stop $service
-            sudo systemctl disable $service
-            sudo rm -f /etc/systemd/system/$service.service
-        fi
+    
+    # 1. Danh sách các component và port tương ứng
+    local components=(
+        "grafana:$GRAFANA_PORT"
+        "prometheus:$PROMETHEUS_PORT"
+        "node_exporter:$NODE_EXPORTER_PORT"
+        "promtail:$PROMTAIL_PORT"
+        "loki:$LOKI_PORT"
+        "dcgm-exporter:$NVIDIA_EXPORTER_PORT"
+        "nvidia-smi-exporter:$NVIDIA_EXPORTER_PORT"
+    )
+    
+    # 2. Dọn dẹp từng component
+    for component in "${components[@]}"; do
+        IFS=':' read -r name port <<< "$component"
+        echo -e "\n${YELLOW}=== Removing $name ===${NC}"
+        cleanup_component "$name" "$port"
     done
-
-    # Remove Grafana
-    if dpkg -l | grep -q grafana; then
-        echo -e "Removing Grafana..."
-        sudo apt-get remove --purge grafana -y
-        sudo rm -rf /etc/grafana
-        sudo rm -rf /var/lib/grafana
-        close_port $GRAFANA_PORT
-    fi
-
-    # Remove Prometheus
-    if [ -d "/etc/prometheus" ]; then
-        echo -e "Removing Prometheus..."
-        sudo rm -rf /etc/prometheus
-        sudo rm -rf /var/lib/prometheus
-        sudo rm -f /usr/local/bin/prometheus
-        sudo rm -f /usr/local/bin/promtool
-        sudo userdel prometheus
-        close_port $PROMETHEUS_PORT
-    fi
-
-    # Remove Node Exporter
-    if [ -f "/usr/local/bin/node_exporter" ]; then
-        echo -e "Removing Node Exporter..."
-        sudo rm -f /usr/local/bin/node_exporter
-        sudo userdel node_exporter
-        close_port $NODE_EXPORTER_PORT
-    fi
-
-    # Remove Promtail
-    if [ -f "/usr/local/bin/promtail" ]; then
-        echo -e "Removing Promtail..."
-        sudo rm -rf /etc/promtail
-        sudo rm -f /usr/local/bin/promtail
-        close_port $PROMTAIL_PORT
-    fi
-
-    # Remove Loki
-    if [ -f "/usr/local/bin/loki" ]; then
-        echo -e "Removing Loki..."
-        sudo rm -rf /etc/loki
-        sudo rm -f /usr/local/bin/loki
-        sudo rm -rf /tmp/loki
-        close_port $LOKI_PORT
-    fi
-
-    # Remove NVIDIA DCGM Exporter
-    if [ -f "/usr/local/bin/dcgm-exporter" ]; then
-        echo -e "Removing NVIDIA DCGM Exporter..."
-        sudo rm -f /usr/local/bin/dcgm-exporter
-        close_port $NVIDIA_EXPORTER_PORT
-    fi
-
-    # Reload systemd
-    sudo systemctl daemon-reload
-
-    # Remove APT repository
+    
+    # 3. Xóa các repository và GPG keys
+    echo -e "\n${YELLOW}Removing repositories and GPG keys...${NC}"
     sudo rm -f /etc/apt/sources.list.d/grafana.list
+    sudo rm -f /etc/apt/sources.list.d/nvidia-docker.list
+    sudo rm -f /etc/apt/trusted.gpg.d/grafana.gpg
+    sudo rm -f /etc/apt/trusted.gpg.d/nvidia-docker.gpg
+    
+    # 4. Xóa các thư mục shared
+    echo -e "\n${YELLOW}Removing shared directories...${NC}"
+    sudo rm -rf /var/log/grafana
+    sudo rm -rf /var/log/prometheus
+    sudo rm -rf /var/log/node_exporter
+    sudo rm -rf /var/log/loki
+    sudo rm -rf /var/log/promtail
+    
+    # 5. Update package list
+    echo -e "\n${YELLOW}Updating package list...${NC}"
     sudo apt-get update
-
-    echo -e "${GREEN}All components have been removed successfully!${NC}"
+    
+    # 6. Kiểm tra và thông báo
+    echo -e "\n${GREEN}=== Removal Summary ===${NC}"
+    echo -e "- All monitoring components have been removed"
+    echo -e "- All configuration files have been removed"
+    echo -e "- All data files have been removed"
+    echo -e "- All service files have been removed"
+    echo -e "- All users and groups have been removed"
+    echo -e "- All ports have been closed"
+    echo -e "- All repositories have been removed"
+    echo -e "\n${GREEN}Cleanup completed successfully!${NC}"
 }
 
 # Function to handle multiple selections
