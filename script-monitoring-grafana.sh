@@ -21,7 +21,7 @@ check_for_updates() {
     CURRENT_SCRIPT="$0"
     
     # Download the latest version
-    if wget -q https://raw.githubusercontent.com/yourusername/script-monitoring-grafana/main/script-monitoring-grafana.sh -O $TMP_SCRIPT; then
+    if wget -q https://raw.githubusercontent.com/fat-beo/script-monitoring-grafana/main/script-monitoring-grafana.sh -O $TMP_SCRIPT; then
         # Compare with current version
         if ! cmp -s "$CURRENT_SCRIPT" "$TMP_SCRIPT"; then
             echo -e "${GREEN}New version found! Updating script...${NC}"
@@ -365,7 +365,7 @@ download_configs() {
     mkdir -p configs
     
     # Define base URL for raw config files
-    local base_url="https://raw.githubusercontent.com/nhduo1882/script-monitoring-grafana/main/configs"
+    local base_url="https://raw.githubusercontent.com/fat-beo/script-monitoring-grafana/main"
     local config_file=""
     local target_path=""
     
@@ -388,7 +388,7 @@ download_configs() {
             ;;
     esac
     
-    # Download configuration file
+    # Try to download configuration file
     if wget -q "$base_url/$config_file" -O "configs/$config_file"; then
         echo -e "${GREEN}Configuration file for $component downloaded successfully!${NC}"
         
@@ -415,6 +415,7 @@ download_configs() {
         export PROMTAIL_PORT
         export LOKI_PORT
         export NVIDIA_EXPORTER_PORT
+        export HOSTNAME=$(hostname)
         
         envsubst < "configs/$config_file" | sudo tee "$target_path" > /dev/null
         
