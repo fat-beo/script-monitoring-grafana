@@ -806,6 +806,10 @@ install_loki() {
         sudo apt-get update && sudo apt-get install -y unzip
     fi
     
+    # Create necessary directories
+    sudo mkdir -p /etc/loki
+    sudo mkdir -p /var/lib/loki
+    
     # Download config file first
     if ! download_configs "loki"; then
         echo -e "${RED}Failed to download Loki configuration. Installation aborted.${NC}"
@@ -815,18 +819,45 @@ install_loki() {
     # Download and install Loki
     echo -e "\n${YELLOW}Downloading and installing Loki...${NC}"
     LOKI_VERSION=$(curl -s https://api.github.com/repos/grafana/loki/releases/latest | grep tag_name | cut -d '"' -f 4)
-    wget https://github.com/grafana/loki/releases/download/${LOKI_VERSION}/loki-linux-amd64.zip
+    if [ -z "$LOKI_VERSION" ]; then
+        echo -e "${RED}Failed to get latest Loki version${NC}"
+        return 1
+    fi
+    echo -e "${YELLOW}Latest Loki version: $LOKI_VERSION${NC}"
     
-    # Unzip with verbose output
-    unzip -o loki-linux-amd64.zip
-    if [ ! -f "loki-linux-amd64" ]; then
+    # Download with error checking
+    if ! wget -O loki-linux-amd64.zip "https://github.com/grafana/loki/releases/download/${LOKI_VERSION}/loki-linux-amd64.zip"; then
+        echo -e "${RED}Failed to download Loki binary${NC}"
+        return 1
+    fi
+    
+    # Verify zip file exists and is not empty
+    if [ ! -s "loki-linux-amd64.zip" ]; then
+        echo -e "${RED}Downloaded Loki zip file is empty or does not exist${NC}"
+        return 1
+    fi
+    
+    # Unzip with verbose output and error checking
+    if ! unzip -o loki-linux-amd64.zip; then
         echo -e "${RED}Failed to extract Loki binary${NC}"
         return 1
     fi
     
+    # Verify binary exists after extraction
+    if [ ! -f "loki-linux-amd64" ]; then
+        echo -e "${RED}Loki binary not found after extraction${NC}"
+        return 1
+    fi
+    
+    # Create loki user and set permissions
+    sudo useradd --system --no-create-home --shell /bin/false loki || true
+    
     # Move binary and set permissions
     sudo mv loki-linux-amd64 /usr/local/bin/loki
     sudo chmod +x /usr/local/bin/loki
+    sudo chown loki:loki /usr/local/bin/loki
+    sudo chown -R loki:loki /etc/loki
+    sudo chown -R loki:loki /var/lib/loki
     
     # Cleanup downloaded files
     rm -f loki-linux-amd64.zip
@@ -839,17 +870,33 @@ Wants=network-online.target
 After=network-online.target
 
 [Service]
+User=loki
+Group=loki
 Type=simple
 ExecStart=/usr/local/bin/loki -config.file=/etc/loki/config.yml
+WorkingDirectory=/var/lib/loki
+Restart=always
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
 EOF
 
-    # Start service
+    # Verify service file was created
+    if [ ! -f "/etc/systemd/system/loki.service" ]; then
+        echo -e "${RED}Failed to create Loki service file${NC}"
+        return 1
+    fi
+    
+    # Start service with error checking
+    echo -e "\n${YELLOW}Starting Loki service...${NC}"
     sudo systemctl daemon-reload
     sudo systemctl enable loki
-    sudo systemctl start loki
+    if ! sudo systemctl start loki; then
+        echo -e "${RED}Failed to start Loki service. Checking logs...${NC}"
+        sudo journalctl -u loki -n 50 --no-pager
+        return 1
+    fi
     
     # Open port
     open_port $LOKI_PORT
@@ -860,8 +907,12 @@ EOF
         return 1
     fi
     
+    # Wait a few seconds for the service to fully start
+    sleep 5
+    
     if ! systemctl is-active --quiet loki; then
-        echo -e "${RED}Failed to start Loki service${NC}"
+        echo -e "${RED}Failed to start Loki service. Checking logs...${NC}"
+        sudo journalctl -u loki -n 50 --no-pager
         return 1
     fi
     
@@ -1068,6 +1119,39 @@ remove_all_components() {
     echo -e "\n${GREEN}Quá trình dọn dẹp đã hoàn tất thành công!${NC}"
 }
 
+# Function to check status of all services
+check_all_services_status() {
+    echo -e "${YELLOW}Checking status of all services...${NC}"
+    
+    # Array of services to check
+    local services=(
+        "grafana-server:Grafana"
+        "prometheus:Prometheus"
+        "node_exporter:Node Exporter"
+        "promtail:Promtail"
+        "loki:Loki"
+        "nvidia-smi-exporter:NVIDIA SMI Exporter"
+    )
+    
+    local any_service_found=false
+    
+    for service_info in "${services[@]}"; do
+        IFS=':' read -r service_name display_name <<< "$service_info"
+        if systemctl list-unit-files | grep -q "$service_name"; then
+            any_service_found=true
+            echo -e "\n${GREEN}=== $display_name ===${NC}"
+            systemctl status $service_name | grep -E "Active:|●"
+        fi
+    done
+    
+    if [ "$any_service_found" = false ]; then
+        echo -e "${YELLOW}No monitoring services are currently installed.${NC}"
+        return 1
+    fi
+    
+    return 0
+}
+
 # Function to handle multiple selections
 handle_selections() {
     local selections=("$@")
@@ -1127,6 +1211,10 @@ handle_selections() {
                 if [[ $confirm =~ ^[Yy]$ ]]; then
                     remove_all_components
                 fi
+                exit 0
+                ;;
+            9)
+                check_all_services_status
                 exit 0
                 ;;
         esac
@@ -1193,6 +1281,7 @@ else
     echo "6. NVIDIA SMI Exporter"
     echo "7. Configure Ports"
     echo "8. Remove All Components"
+    echo "9. Check Services Status"
     echo -e "\n${YELLOW}Enter the corresponding numbers separated by spaces (e.g., 1 2 3 4...):${NC}"
     
     read -a selections
