@@ -3,8 +3,12 @@ auth_enabled: false
 server:
   http_listen_address: 0.0.0.0
   http_listen_port: ${LOKI_PORT}
+  grpc_listen_port: 9096
+  log_level: debug
+  grpc_server_max_concurrent_streams: 1000
 
 common:
+  instance_addr: 0.0.0.0
   path_prefix: /tmp/loki
   storage:
     filesystem:
@@ -15,9 +19,16 @@ common:
     kvstore:
       store: inmemory
 
+query_range:
+  results_cache:
+    cache:
+      embedded_cache:
+        enabled: true
+        max_size_mb: 100
+
 schema_config:
   configs:
-    - from: 2021-01-01
+    - from: 2020-10-24
       store: boltdb-shipper
       object_store: filesystem
       schema: v12
@@ -25,17 +36,23 @@ schema_config:
         prefix: index_
         period: 24h
 
-storage:
+ingester:
+  lifecycler:
+    address: 0.0.0.0
+    ring:
+      kvstore:
+        store: inmemory
+      replication_factor: 1
+    final_sleep: 0s
+  chunk_idle_period: 5m
+  chunk_retain_period: 30s
+
+storage_config:
   boltdb_shipper:
     active_index_directory: /tmp/loki/index
     cache_location: /tmp/loki/boltdb-cache
-    shared_store: filesystem
-    cache_ttl: 24h
-
-compactor:
-  working_directory: /tmp/loki/compactor
-  shared_store: filesystem
-  compaction_interval: 10m
+  filesystem:
+    directory: /tmp/loki/chunks
 
 limits_config:
   max_query_parallelism: 32
@@ -59,8 +76,25 @@ ruler:
     local:
       directory: /tmp/loki/rules
   rule_path: /tmp/loki/rules-temp
-  alertmanager_url: http://localhost:9093
+  alertmanager_url: http://0.0.0.0:9093
   ring:
     kvstore:
       store: inmemory
-  enable_api: true 
+  enable_api: true
+
+frontend:
+  encoding: protobuf
+
+
+# By default, Loki will send anonymous, but uniquely-identifiable usage and configuration
+# analytics to Grafana Labs. These statistics are sent to https://stats.grafana.org/
+#
+# Statistics help us better understand how Loki is used, and they show us performance
+# levels for most users. This helps us prioritize features and documentation.
+# For more information on what's sent, look at
+# https://github.com/grafana/loki/blob/main/pkg/analytics/stats.go
+# Refer to the buildReport method to see what goes into a report.
+#
+# If you would like to disable reporting, uncomment the following lines:
+#analytics:
+#  reporting_enabled: false 
