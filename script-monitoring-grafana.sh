@@ -979,10 +979,13 @@ install_nvidia_smi_exporter() {
 
     # Download NVIDIA SMI Exporter
     echo -e "${YELLOW}Downloading NVIDIA SMI Exporter...${NC}"
-    wget https://github.com/utkuozdemir/nvidia_gpu_exporter/releases/download/v1.1.0/nvidia_gpu_exporter_1.1.0_linux_amd64.tar.gz
+    if ! wget https://github.com/utkuozdemir/nvidia_gpu_exporter/releases/download/v1.2.1/nvidia_gpu_exporter_1.2.1_linux_x86_64.tar.gz; then
+        echo -e "${RED}Failed to download NVIDIA SMI Exporter. Installation aborted.${NC}"
+        return 1
+    fi
     
     # Extract and install
-    tar xvf nvidia_gpu_exporter_1.1.0_linux_amd64.tar.gz
+    tar xvf nvidia_gpu_exporter_1.2.1_linux_x86_64.tar.gz
     sudo cp nvidia_gpu_exporter /usr/local/bin/
     rm -rf nvidia_gpu_exporter*
     
