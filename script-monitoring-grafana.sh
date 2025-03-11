@@ -868,69 +868,25 @@ install_nvidia_prometheus() {
     sudo rm -f /etc/systemd/system/nvidia-exporter.service
     sudo systemctl daemon-reload
     
-    # Install NVIDIA DCGM
-    echo -e "${YELLOW}Installing NVIDIA DCGM...${NC}"
-    
-    # Add NVIDIA repository
-    distribution=$(. /etc/os-release;echo $ID$VERSION_ID) \
-    && curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add - \
-    && curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
-    
-    # Update package list
+    # Install prerequisites
+    echo -e "${YELLOW}Installing prerequisites...${NC}"
     sudo apt-get update
+    sudo apt-get install -y git golang-go build-essential
     
-    # Install DCGM
-    if ! sudo apt-get install -y datacenter-gpu-manager; then
-        echo -e "${RED}Failed to install DCGM. Trying alternative method...${NC}"
-        
-        # Try installing nvidia-dcgm first
-        if ! sudo apt-get install -y nvidia-dcgm; then
-            echo -e "${RED}Failed to install nvidia-dcgm. Installation aborted.${NC}"
-            return 1
-        fi
-    fi
+    # Clone repository
+    echo -e "${YELLOW}Cloning DCGM Exporter repository...${NC}"
+    git clone https://github.com/NVIDIA/dcgm-exporter.git
+    cd dcgm-exporter
     
-    # Create DCGM service file if it doesn't exist
-    if [ ! -f "/etc/systemd/system/nvidia-dcgm.service" ]; then
-        sudo tee /etc/systemd/system/nvidia-dcgm.service > /dev/null << 'EOF'
-[Unit]
-Description=NVIDIA Data Center GPU Manager
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/usr/bin/nv-hostengine
-Restart=always
-RestartSec=10
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    fi
+    # Build binary
+    echo -e "${YELLOW}Building DCGM Exporter...${NC}"
+    make binary
     
-    # Start and enable DCGM service
-    sudo systemctl daemon-reload
-    sudo systemctl enable nvidia-dcgm
-    sudo systemctl start nvidia-dcgm
+    # Install binary
+    echo -e "${YELLOW}Installing DCGM Exporter...${NC}"
+    sudo make install
     
-    # Wait for DCGM to start
-    echo -e "${YELLOW}Waiting for DCGM to start...${NC}"
-    sleep 5
-    
-    # Download DCGM Exporter
-    echo -e "${YELLOW}Downloading DCGM Exporter...${NC}"
-    if ! wget -O /tmp/dcgm-exporter.deb https://github.com/NVIDIA/dcgm-exporter/releases/download/v3.1.7/dcgm-exporter-3.1.7-ubuntu20.04-amd64.deb; then
-        echo -e "${RED}Failed to download DCGM Exporter. Installation aborted.${NC}"
-        return 1
-    fi
-    
-    # Install DCGM Exporter
-    if ! sudo dpkg -i /tmp/dcgm-exporter.deb; then
-        echo -e "${RED}Failed to install DCGM Exporter. Installation aborted.${NC}"
-        return 1
-    fi
-    
-    # Create systemd service for DCGM Exporter
+    # Create systemd service
     sudo tee /etc/systemd/system/dcgm-exporter.service > /dev/null << 'EOF'
 [Unit]
 Description=NVIDIA DCGM Exporter
@@ -946,7 +902,7 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
     
-    # Start and enable DCGM Exporter service
+    # Start and enable service
     sudo systemctl daemon-reload
     sudo systemctl enable dcgm-exporter
     sudo systemctl start dcgm-exporter
@@ -954,11 +910,17 @@ EOF
     # Add to Prometheus config
     add_prometheus_job "nvidia_gpu" $NVIDIA_EXPORTER_PORT
     
-    # Open port for NVIDIA Exporter
-    sudo ufw allow $NVIDIA_EXPORTER_PORT/tcp
+    # Open port
+    open_port $NVIDIA_EXPORTER_PORT
     
-    echo -e "${GREEN}NVIDIA Prometheus Exporter installed successfully${NC}"
-    echo -e "${GREEN}You can access metrics at http://localhost:$NVIDIA_EXPORTER_PORT/metrics${NC}"
+    if sudo systemctl is-active --quiet dcgm-exporter; then
+        echo -e "${GREEN}NVIDIA Prometheus Exporter installed successfully!${NC}"
+        echo -e "${GREEN}You can access metrics at http://localhost:$NVIDIA_EXPORTER_PORT/metrics${NC}"
+        return 0
+    else
+        echo -e "${RED}Failed to install NVIDIA Prometheus Exporter.${NC}"
+        return 1
+    fi
 }
 
 # Function to install NVIDIA SMI Exporter
