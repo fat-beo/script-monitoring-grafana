@@ -91,10 +91,15 @@ configure_ports() {
     read -p "NVIDIA Exporter port (default: $NVIDIA_EXPORTER_PORT): " input
     NVIDIA_EXPORTER_PORT=${input:-$NVIDIA_EXPORTER_PORT}
     
+    # Reload systemd before making changes
+    echo -e "${YELLOW}Reloading systemd daemon...${NC}"
+    sudo systemctl daemon-reload
+    
     # Update Grafana configuration if installed
     if [ -f "/etc/grafana/grafana.ini" ]; then
         echo -e "${YELLOW}Updating Grafana configuration...${NC}"
         sudo sed -i "s/http_port = .*/http_port = $GRAFANA_PORT/" /etc/grafana/grafana.ini
+        sudo systemctl daemon-reload
         sudo systemctl restart grafana-server
         # Update firewall rules
         close_port $old_grafana_port
@@ -120,6 +125,7 @@ configure_ports() {
             sudo sed -i "s/targets: \['0.0.0.0:.*'\]/targets: ['0.0.0.0:$NVIDIA_EXPORTER_PORT']/" /etc/prometheus/prometheus.yml
         fi
         
+        sudo systemctl daemon-reload
         sudo systemctl restart prometheus
         # Update firewall rules
         close_port $old_prometheus_port
@@ -132,6 +138,7 @@ configure_ports() {
     if [ -f "/etc/systemd/system/node_exporter.service" ]; then
         echo -e "${YELLOW}Updating Node Exporter configuration...${NC}"
         sudo sed -i "s/--web.listen-address=0.0.0.0:.*/--web.listen-address=0.0.0.0:$NODE_EXPORTER_PORT/" /etc/systemd/system/node_exporter.service
+        sudo systemctl daemon-reload
         sudo systemctl restart node_exporter
         # Update firewall rules
         close_port $old_node_exporter_port
@@ -145,6 +152,7 @@ configure_ports() {
         echo -e "${YELLOW}Updating Promtail configuration...${NC}"
         sudo sed -i "s/http_listen_port: .*/http_listen_port: $PROMTAIL_PORT/" /etc/promtail/config.yml
         sudo sed -i "s|url: http://0.0.0.0:.*/loki/api/v1/push|url: http://0.0.0.0:$LOKI_PORT/loki/api/v1/push|" /etc/promtail/config.yml
+        sudo systemctl daemon-reload
         sudo systemctl restart promtail
         # Update firewall rules
         close_port $old_promtail_port
@@ -157,6 +165,7 @@ configure_ports() {
     if [ -f "/etc/loki/config.yml" ]; then
         echo -e "${YELLOW}Updating Loki configuration...${NC}"
         sudo sed -i "s/http_listen_port: .*/http_listen_port: $LOKI_PORT/" /etc/loki/config.yml
+        sudo systemctl daemon-reload
         sudo systemctl restart loki
         # Update firewall rules
         close_port $old_loki_port
@@ -169,6 +178,7 @@ configure_ports() {
     if [ -f "/etc/systemd/system/dcgm-exporter.service" ]; then
         echo -e "${YELLOW}Updating NVIDIA Exporter configuration...${NC}"
         sudo sed -i "s/--address=0.0.0.0:.*/--address=0.0.0.0:$NVIDIA_EXPORTER_PORT/" /etc/systemd/system/dcgm-exporter.service
+        sudo systemctl daemon-reload
         sudo systemctl restart dcgm-exporter
         # Update firewall rules
         close_port $old_nvidia_exporter_port
@@ -176,6 +186,9 @@ configure_ports() {
     else
         echo -e "${YELLOW}NVIDIA Exporter is not installed. Port configuration will be applied when NVIDIA Exporter is installed.${NC}"
     fi
+    
+    # Final systemd reload to ensure all changes are applied
+    sudo systemctl daemon-reload
     
     echo -e "${GREEN}Ports configured successfully!${NC}"
     echo -e "${YELLOW}Note: Port configurations will be applied when the respective components are installed.${NC}"
