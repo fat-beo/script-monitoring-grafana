@@ -19,11 +19,13 @@ Script này tự động hóa quá trình cài đặt các thành phần của G
   - [Installation](#installation)
   - [Usage](#usage)
   - [Notes](#notes)
+  - [Target Configuration Guide](#target-configuration-guide)
 - [Tiếng Việt](#tiếng-việt)
   - [Tính năng](#tính-năng)
   - [Cài đặt](#cài-đặt)
   - [Sử dụng](#sử-dụng)
   - [Lưu ý](#lưu-ý)
+  - [Hướng dẫn cấu hình thêm target](#hướng-dẫn-cấu-hình-thêm-target)
 
 ## English
 
@@ -81,11 +83,16 @@ sudo ./script-monitoring-grafana.sh
 - All services are configured to listen on 0.0.0.0 for external access
 - You can select multiple components by entering their numbers separated by spaces (e.g., `2 3 4`)
 
-## Target Configuration Guide
+### Target Configuration Guide
 
 ### Configuring Prometheus and Loki
 
-1. Open Prometheus configuration:
+1. Backup current configuration (recommended):
+```bash
+sudo cp /etc/prometheus/prometheus.yml /etc/prometheus/prometheus.yml.backup
+```
+
+2. Open Prometheus configuration:
 ```bash
 sudo nano /etc/prometheus/prometheus.yml
 ```
@@ -197,62 +204,73 @@ sudo ./script-monitoring-grafana.sh
 - Tất cả các dịch vụ được cấu hình để lắng nghe trên 0.0.0.0 để cho phép truy cập từ bên ngoài
 - Bạn có thể chọn nhiều thành phần bằng cách nhập số của chúng cách nhau bởi dấu cách (ví dụ: `2 3 4`)
 
-## Target Configuration Guide
+### Hướng dẫn cấu hình thêm target
 
-### Configuring Prometheus and Loki
+### Cấu hình Prometheus và Loki
 
-1. Open Prometheus configuration:
+1. Sao lưu cấu hình hiện tại (khuyến nghị):
+```bash
+sudo cp /etc/prometheus/prometheus.yml /etc/prometheus/prometheus.yml.backup
+```
+
+2. Mở file cấu hình Prometheus:
 ```bash
 sudo nano /etc/prometheus/prometheus.yml
 ```
 
-2. Example configuration for adding a new target:
+3. Ví dụ cấu hình thêm target mới:
 ```yaml
 scrape_configs:
-  - job_name: 'my_new_target'
+  # Các job hiện tại sẽ ở đây
+  # Thêm job mới của bạn bên dưới
+  - job_name: 'my_new_target'          # Thay đổi tên job
     static_configs:
-      - targets: ['192.168.1.100:9100']
+      - targets: ['192.168.1.100:9100'] # Thay đổi IP và port
     labels:
-      location: 'server_room'
-      environment: 'production'
+      location: 'server_room'           # Tùy chọn
+      environment: 'production'         # Tùy chọn
 ```
 
-3. Save the file:
-   - Press `Ctrl + X`
-   - Press `Y`
-   - Press `Enter`
+4. Lưu file:
+   - Nhấn: `Ctrl + X`
+   - Nhấn: `Y`
+   - Nhấn: `Enter`
 
-4. Check configuration and restart:
+5. Kiểm tra cấu hình và khởi động lại:
 ```bash
-# Check syntax
+# Kiểm tra cú pháp
 sudo promtool check config /etc/prometheus/prometheus.yml
 
-# Restart if syntax is correct
+# Khởi động lại nếu cú pháp đúng
 sudo systemctl restart prometheus
 ```
 
-### Important Notes
+### Lưu ý quan trọng
 
-1. Before adding target:
+1. Trước khi thêm target:
 ```bash
-# Open port in firewall
+# Mở port trong firewall
 sudo ufw allow target_port/tcp
 
-# Test connection
+# Kiểm tra kết nối
 telnet target_ip target_port
 ```
 
-2. After adding target:
-- Check Prometheus UI:
+2. Sau khi thêm target:
+- Kiểm tra giao diện Prometheus:
   - http://your_server:9090/targets
-- Check Grafana:
+- Kiểm tra Grafana:
   - http://your_server:3000
 
-3. If there are issues:
+3. Nếu có lỗi:
 ```bash
-# View Prometheus logs
+# Xem log Prometheus
 sudo journalctl -u prometheus -f
 
-# View target metrics
+# Xem metrics của target
 curl http://target_ip:target_port/metrics
+
+# Khôi phục cấu hình backup nếu cần
+sudo cp /etc/prometheus/prometheus.yml.backup /etc/prometheus/prometheus.yml
+sudo systemctl restart prometheus
 ```
