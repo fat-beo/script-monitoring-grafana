@@ -81,6 +81,66 @@ sudo ./script-monitoring-grafana.sh
 - All services are configured to listen on 0.0.0.0 for external access
 - You can select multiple components by entering their numbers separated by spaces (e.g., `2 3 4`)
 
+## Target Configuration Guide
+
+### Configuring Prometheus and Loki
+
+1. Open Prometheus configuration:
+```bash
+sudo nano /etc/prometheus/prometheus.yml
+```
+
+2. Example configuration for adding a new target:
+```yaml
+scrape_configs:
+  - job_name: 'my_new_target'
+    static_configs:
+      - targets: ['192.168.1.100:9100']
+    labels:
+      location: 'server_room'
+      environment: 'production'
+```
+
+3. Save the file:
+   - Press `Ctrl + X`
+   - Press `Y`
+   - Press `Enter`
+
+4. Check configuration and restart:
+```bash
+# Check syntax
+sudo promtool check config /etc/prometheus/prometheus.yml
+
+# Restart if syntax is correct
+sudo systemctl restart prometheus
+```
+
+### Important Notes
+
+1. Before adding target:
+```bash
+# Open port in firewall
+sudo ufw allow target_port/tcp
+
+# Test connection
+telnet target_ip target_port
+```
+
+2. After adding target:
+- Check Prometheus UI:
+  - http://your_server:9090/targets
+- Check Grafana:
+  - http://your_server:3000
+
+3. If there are issues:
+```bash
+# View Prometheus logs
+sudo journalctl -u prometheus -f
+
+# View target metrics
+curl http://target_ip:target_port/metrics
+```
+
 ## Tiếng Việt
 
 ### Tính năng
@@ -136,3 +196,63 @@ sudo ./script-monitoring-grafana.sh
   - NVIDIA Exporter: 9400
 - Tất cả các dịch vụ được cấu hình để lắng nghe trên 0.0.0.0 để cho phép truy cập từ bên ngoài
 - Bạn có thể chọn nhiều thành phần bằng cách nhập số của chúng cách nhau bởi dấu cách (ví dụ: `2 3 4`)
+
+## Target Configuration Guide
+
+### Configuring Prometheus and Loki
+
+1. Open Prometheus configuration:
+```bash
+sudo nano /etc/prometheus/prometheus.yml
+```
+
+2. Example configuration for adding a new target:
+```yaml
+scrape_configs:
+  - job_name: 'my_new_target'
+    static_configs:
+      - targets: ['192.168.1.100:9100']
+    labels:
+      location: 'server_room'
+      environment: 'production'
+```
+
+3. Save the file:
+   - Press `Ctrl + X`
+   - Press `Y`
+   - Press `Enter`
+
+4. Check configuration and restart:
+```bash
+# Check syntax
+sudo promtool check config /etc/prometheus/prometheus.yml
+
+# Restart if syntax is correct
+sudo systemctl restart prometheus
+```
+
+### Important Notes
+
+1. Before adding target:
+```bash
+# Open port in firewall
+sudo ufw allow target_port/tcp
+
+# Test connection
+telnet target_ip target_port
+```
+
+2. After adding target:
+- Check Prometheus UI:
+  - http://your_server:9090/targets
+- Check Grafana:
+  - http://your_server:3000
+
+3. If there are issues:
+```bash
+# View Prometheus logs
+sudo journalctl -u prometheus -f
+
+# View target metrics
+curl http://target_ip:target_port/metrics
+```
