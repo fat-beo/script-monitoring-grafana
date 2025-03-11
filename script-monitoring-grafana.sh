@@ -580,14 +580,18 @@ install_grafana() {
     echo -e "\n${YELLOW}Configuring firewall...${NC}"
     open_port "$GRAFANA_PORT"
     
-    # 9. Check installation
+    # 9. Configure admin password
+    echo -e "\n${YELLOW}Configuring Grafana admin password...${NC}"
+    configure_grafana_password
+    
+    # 10. Check installation
     echo -e "\n${YELLOW}Checking installation...${NC}"
     if systemctl is-active --quiet grafana-server; then
         echo -e "${GREEN}Grafana has been installed successfully!${NC}"
         echo -e "Access Grafana at: http://localhost:$GRAFANA_PORT"
         echo -e "Default credentials:"
         echo -e "Username: admin"
-        echo -e "Password: admin"
+        echo -e "Password: (the one you just set)"
     else
         echo -e "${RED}Failed to install Grafana. Please check the logs.${NC}"
         return 1
@@ -840,35 +844,36 @@ install_nvidia_prometheus() {
     
     # 2. Check prerequisites
     echo -e "\n${YELLOW}Checking prerequisites...${NC}"
-    if ! command -v git &> /dev/null; then
-        sudo apt-get install -y git
-    fi
-    if ! command -v golang-go &> /dev/null; then
-        sudo apt-get install -y golang-go
-    fi
-    if ! command -v build-essential &> /dev/null; then
-        sudo apt-get install -y build-essential
+    if ! command -v wget &> /dev/null; then
+        sudo apt-get install -y wget
     fi
     
-    # 3. Clone repository
-    echo -e "\n${YELLOW}Cloning DCGM Exporter repository...${NC}"
-    git clone https://github.com/NVIDIA/dcgm-exporter.git
-    cd dcgm-exporter
+    # 3. Download and install DCGM package
+    echo -e "\n${YELLOW}Downloading and installing DCGM package...${NC}"
+    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/nvidia-dcgm_3.3.1_amd64.deb
+    sudo dpkg -i nvidia-dcgm_3.3.1_amd64.deb
     
-    # 4. Build binary
-    echo -e "\n${YELLOW}Building DCGM Exporter...${NC}"
-    make binary
+    # 4. Download and install DCGM run file
+    echo -e "\n${YELLOW}Downloading and installing DCGM run file...${NC}"
+    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/NVIDIA-Linux-x86_64-DCGM.run
+    chmod +x NVIDIA-Linux-x86_64-DCGM.run
+    sudo ./NVIDIA-Linux-x86_64-DCGM.run
     
-    # 5. Install binary
-    echo -e "\n${YELLOW}Installing DCGM Exporter...${NC}"
-    sudo make install
+    # 5. Start and enable DCGM service
+    echo -e "\n${YELLOW}Starting and enabling DCGM service...${NC}"
+    sudo systemctl start nvidia-dcgm
+    sudo systemctl enable nvidia-dcgm
     
-    # 6. Create systemd service
-    echo -e "\n${YELLOW}Creating systemd service...${NC}"
+    # 6. Start DCGM Exporter
+    echo -e "\n${YELLOW}Starting DCGM Exporter...${NC}"
+    /usr/bin/dcgm-exporter &
+    
+    # 7. Create systemd service for DCGM Exporter
+    echo -e "\n${YELLOW}Creating systemd service for DCGM Exporter...${NC}"
     sudo tee /etc/systemd/system/dcgm-exporter.service > /dev/null << 'EOF'
 [Unit]
 Description=NVIDIA DCGM Exporter
-After=network.target
+After=network.target nvidia-dcgm.service
 
 [Service]
 Type=simple
@@ -880,17 +885,17 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
     
-    # 7. Start and enable service
-    echo -e "\n${YELLOW}Starting and enabling service...${NC}"
+    # 8. Start and enable DCGM Exporter service
+    echo -e "\n${YELLOW}Starting and enabling DCGM Exporter service...${NC}"
     sudo systemctl daemon-reload
     sudo systemctl enable dcgm-exporter
     sudo systemctl start dcgm-exporter
     
-    # 8. Configure firewall
+    # 9. Configure firewall
     echo -e "\n${YELLOW}Configuring firewall...${NC}"
     open_port "$NVIDIA_EXPORTER_PORT"
     
-    # 9. Add to Prometheus config
+    # 10. Add to Prometheus config
     echo -e "\n${YELLOW}Adding to Prometheus config...${NC}"
     # Check if promtool exists
     if ! command -v promtool &> /dev/null; then
@@ -905,9 +910,9 @@ EOF
     # Add job to Prometheus config
     add_prometheus_job "nvidia_gpu" "$NVIDIA_EXPORTER_PORT"
     
-    # 10. Check installation
+    # 11. Check installation
     echo -e "\n${YELLOW}Checking installation...${NC}"
-    if systemctl is-active --quiet dcgm-exporter; then
+    if systemctl is-active --quiet dcgm-exporter && systemctl is-active --quiet nvidia-dcgm; then
         echo -e "${GREEN}NVIDIA Prometheus Exporter has been installed successfully!${NC}"
         echo -e "Access metrics at: http://localhost:$NVIDIA_EXPORTER_PORT/metrics"
         return 0
