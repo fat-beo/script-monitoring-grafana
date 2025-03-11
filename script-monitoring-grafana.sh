@@ -964,6 +964,68 @@ EOF
     fi
 }
 
+# Function to install NVIDIA SMI Exporter
+install_nvidia_smi_exporter() {
+    echo -e "${YELLOW}Installing NVIDIA SMI Exporter...${NC}"
+    
+    # Cleanup old installation
+    cleanup_component "nvidia_smi_exporter" $NVIDIA_EXPORTER_PORT
+    
+    # Check if NVIDIA drivers are installed
+    if ! command -v nvidia-smi &> /dev/null; then
+        echo -e "${RED}NVIDIA drivers are not installed. Please install drivers first.${NC}"
+        return 1
+    fi
+
+    # Create nvidia-smi-exporter user
+    sudo useradd --no-create-home --shell /bin/false nvidia-smi-exporter || true
+
+    # Download NVIDIA SMI Exporter
+    echo -e "${YELLOW}Downloading NVIDIA SMI Exporter...${NC}"
+    wget https://github.com/utkuozdemir/nvidia_gpu_exporter/releases/download/v1.1.0/nvidia_gpu_exporter_1.1.0_linux_amd64.tar.gz
+    
+    # Extract and install
+    tar xvf nvidia_gpu_exporter_1.1.0_linux_amd64.tar.gz
+    sudo cp nvidia_gpu_exporter /usr/local/bin/
+    rm -rf nvidia_gpu_exporter*
+    
+    # Create systemd service
+    cat << EOF | sudo tee /etc/systemd/system/nvidia-smi-exporter.service
+[Unit]
+Description=NVIDIA SMI Exporter
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=nvidia-smi-exporter
+Group=nvidia-smi-exporter
+Type=simple
+ExecStart=/usr/local/bin/nvidia_gpu_exporter --web.listen-address=0.0.0.0:$NVIDIA_EXPORTER_PORT
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+    # Start service
+    sudo systemctl daemon-reload
+    sudo systemctl start nvidia-smi-exporter
+    sudo systemctl enable nvidia-smi-exporter
+    
+    # Add to Prometheus config
+    add_prometheus_job "nvidia_gpu" $NVIDIA_EXPORTER_PORT
+    
+    # Open port
+    open_port $NVIDIA_EXPORTER_PORT
+    
+    if sudo systemctl is-active --quiet nvidia-smi-exporter; then
+        echo -e "${GREEN}NVIDIA SMI Exporter installed successfully!${NC}"
+        return 0
+    else
+        echo -e "${RED}Failed to install NVIDIA SMI Exporter.${NC}"
+        return 1
+    fi
+}
+
 # Function to remove all components
 remove_all_components() {
     echo -e "${YELLOW}Removing all monitoring components...${NC}"
@@ -1088,10 +1150,27 @@ handle_selections() {
                 ;;
             6)
                 if install_nvidia_prometheus; then
-                    installed_components+=("NVIDIA Exporter:$NVIDIA_EXPORTER_PORT")
+                    installed_components+=("NVIDIA DCGM Exporter:$NVIDIA_EXPORTER_PORT")
                 else
                     success=false
                 fi
+                ;;
+            7)
+                if install_nvidia_smi_exporter; then
+                    installed_components+=("NVIDIA SMI Exporter:$NVIDIA_EXPORTER_PORT")
+                else
+                    success=false
+                fi
+                ;;
+            8)
+                configure_ports
+                ;;
+            9)
+                read -p "Are you sure you want to remove all components? This action cannot be undone. (y/N): " confirm
+                if [[ $confirm =~ ^[Yy]$ ]]; then
+                    remove_all_components
+                fi
+                exit 0
                 ;;
         esac
     done
@@ -1127,9 +1206,10 @@ else
     echo "3. Node Exporter"
     echo "4. Promtail"
     echo "5. Loki"
-    echo "6. NVIDIA Prometheus Exporter"
-    echo "7. Configure Ports"
-    echo "8. Remove All Components"
+    echo "6. NVIDIA DCGM Exporter"
+    echo "7. NVIDIA SMI Exporter"
+    echo "8. Configure Ports"
+    echo "9. Remove All Components"
     echo -e "\n${YELLOW}Enter the corresponding numbers separated by spaces (e.g., 1 2 3 4...):${NC}"
     
     read -a selections
@@ -1142,7 +1222,7 @@ else
     
     # Check for remove all option
     for selection in "${selections[@]}"; do
-        if [ "$selection" = "8" ]; then
+        if [ "$selection" = "9" ]; then
             read -p "Are you sure you want to remove all components? This action cannot be undone. (y/N): " confirm
             if [[ $confirm =~ ^[Yy]$ ]]; then
                 remove_all_components
@@ -1153,10 +1233,10 @@ else
     
     # Check if port configuration is selected
     for selection in "${selections[@]}"; do
-        if [ "$selection" = "7" ]; then
+        if [ "$selection" = "8" ]; then
             configure_ports
-            # Remove 7 from selections array
-            selections=("${selections[@]/7}")
+            # Remove 8 from selections array
+            selections=("${selections[@]/8}")
             break
         fi
     done
