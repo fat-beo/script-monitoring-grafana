@@ -581,9 +581,27 @@ EOF
     sudo systemctl start node_exporter
     sudo systemctl enable node_exporter
     
-    # Add to Prometheus config
-    sudo sed -i '/scrape_configs:/a\  - job_name: '\''node'\''\n    static_configs:\n      - targets: ['\''0.0.0.0:'$NODE_EXPORTER_PORT'\'']' /etc/prometheus/prometheus.yml
-    sudo systemctl restart prometheus
+    # Add to Prometheus config with proper syntax checking
+    if [ -f "/etc/prometheus/prometheus.yml" ]; then
+        # Create backup
+        sudo cp /etc/prometheus/prometheus.yml /etc/prometheus/prometheus.yml.bak
+        
+        # Add job with proper indentation and quotes
+        echo "
+  - job_name: 'node'
+    static_configs:
+      - targets: ['0.0.0.0:${NODE_EXPORTER_PORT}']" | sudo tee -a /etc/prometheus/prometheus.yml
+
+        # Verify syntax
+        if /usr/local/bin/promtool check config /etc/prometheus/prometheus.yml; then
+            echo -e "${GREEN}Added Node Exporter job to Prometheus config${NC}"
+            sudo systemctl restart prometheus
+        else
+            echo -e "${RED}Invalid Prometheus config. Restoring backup...${NC}"
+            sudo mv /etc/prometheus/prometheus.yml.bak /etc/prometheus/prometheus.yml
+            return 1
+        fi
+    fi
     
     # Open port
     open_port $NODE_EXPORTER_PORT
@@ -737,9 +755,27 @@ EOF
     sudo systemctl start dcgm-exporter
     sudo systemctl enable dcgm-exporter
     
-    # Add to Prometheus config
-    sudo sed -i '/scrape_configs:/a\  - job_name: '\''nvidia_gpu'\''\n    static_configs:\n      - targets: ['\''0.0.0.0:'$NVIDIA_EXPORTER_PORT'\'']' /etc/prometheus/prometheus.yml
-    sudo systemctl restart prometheus
+    # Add to Prometheus config with proper syntax checking
+    if [ -f "/etc/prometheus/prometheus.yml" ]; then
+        # Create backup
+        sudo cp /etc/prometheus/prometheus.yml /etc/prometheus/prometheus.yml.bak
+        
+        # Add job with proper indentation and quotes
+        echo "
+  - job_name: 'nvidia_gpu'
+    static_configs:
+      - targets: ['0.0.0.0:${NVIDIA_EXPORTER_PORT}']" | sudo tee -a /etc/prometheus/prometheus.yml
+
+        # Verify syntax
+        if /usr/local/bin/promtool check config /etc/prometheus/prometheus.yml; then
+            echo -e "${GREEN}Added NVIDIA Exporter job to Prometheus config${NC}"
+            sudo systemctl restart prometheus
+        else
+            echo -e "${RED}Invalid Prometheus config. Restoring backup...${NC}"
+            sudo mv /etc/prometheus/prometheus.yml.bak /etc/prometheus/prometheus.yml
+            return 1
+        fi
+    fi
     
     # Open port
     open_port $NVIDIA_EXPORTER_PORT
