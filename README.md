@@ -82,6 +82,24 @@ sudo ./script-monitoring-grafana.sh
   - NVIDIA Exporter: 9400
 - All services are configured to listen on 0.0.0.0 for external access
 - You can select multiple components by entering their numbers separated by spaces (e.g., `2 3 4`)
+- For NVIDIA Prometheus Exporter:
+  - Requires NVIDIA drivers to be installed
+  - If installation fails with 404 error, manually install DCGM:
+    ```bash
+    # Install NVIDIA repository
+    distribution=$(. /etc/os-release;echo $ID$VERSION_ID | sed -e 's/\.//g')
+    wget https://developer.download.nvidia.com/compute/cuda/repos/$distribution/x86_64/cuda-keyring_1.0-1_all.deb
+    sudo dpkg -i cuda-keyring_1.0-1_all.deb
+    sudo apt-get update
+
+    # Install DCGM
+    sudo apt-get install -y datacenter-gpu-manager
+
+    # Install DCGM Exporter
+    wget https://raw.githubusercontent.com/NVIDIA/dcgm-exporter/main/dcgm-exporter
+    chmod +x dcgm-exporter
+    sudo mv dcgm-exporter /usr/local/bin/
+    ```
 
 ### Target Configuration Guide
 
@@ -148,6 +166,60 @@ sudo journalctl -u prometheus -f
 curl http://target_ip:target_port/metrics
 ```
 
+### Chi tiết các thành phần
+
+#### Node Exporter
+- Port mặc định: 9100
+- Chức năng: Thu thập các metrics về hệ thống như CPU, RAM, disk I/O, network
+- Metrics path: `/metrics`
+- Các metrics quan trọng:
+  - `node_cpu_seconds_total`: Thời gian CPU
+  - `node_memory_MemTotal_bytes`: Tổng RAM
+  - `node_filesystem_size_bytes`: Dung lượng ổ đĩa
+  - `node_network_receive_bytes_total`: Network traffic
+
+#### Loki
+- Port mặc định: 3100
+- Chức năng: Hệ thống thu thập và lưu trữ logs
+- API endpoints:
+  - `/loki/api/v1/push`: Nhận logs
+  - `/loki/api/v1/query`: Query logs
+- Tính năng:
+  - Lưu trữ logs hiệu quả
+  - Hỗ trợ query logs với LogQL
+  - Tích hợp tốt với Grafana
+- Lưu ý:
+  - Cần đủ disk space cho việc lưu trữ logs
+  - Nên cấu hình retention period phù hợp
+
+#### Promtail
+- Port mặc định: 9080
+- Chức năng: Agent thu thập logs và gửi đến Loki
+- Cấu hình:
+  - Đọc logs từ files
+  - Thêm labels cho logs
+  - Gửi logs đến Loki server
+- Tính năng:
+  - Tự động phát hiện files logs mới
+  - Hỗ trợ nhiều format logs
+  - Đảm bảo không mất logs khi có sự cố
+- Lưu ý:
+  - Cần quyền đọc các file logs
+  - Có thể cấu hình pipeline để xử lý logs
+
+#### NVIDIA SMI Exporter
+- Port mặc định: 9400
+- Chức năng: Thu thập metrics từ GPU NVIDIA sử dụng nvidia-smi
+- Metrics path: `/metrics`
+- Các metrics quan trọng:
+  - `nvidia_smi_gpu_utilization`: GPU utilization
+  - `nvidia_smi_memory_used_bytes`: Memory utilization
+  - `nvidia_smi_power_draw_watts`: Power consumption
+  - `nvidia_smi_temperature_celsius`: GPU temperature
+- Lưu ý:
+  - Yêu cầu NVIDIA driver đã được cài đặt
+  - Cần GPU NVIDIA hỗ trợ nvidia-smi
+
 ## Tiếng Việt
 
 ### Tính năng
@@ -203,6 +275,24 @@ sudo ./script-monitoring-grafana.sh
   - NVIDIA Exporter: 9400
 - Tất cả các dịch vụ được cấu hình để lắng nghe trên 0.0.0.0 để cho phép truy cập từ bên ngoài
 - Bạn có thể chọn nhiều thành phần bằng cách nhập số của chúng cách nhau bởi dấu cách (ví dụ: `2 3 4`)
+- Đối với NVIDIA Prometheus Exporter:
+  - Yêu cầu đã cài đặt driver NVIDIA
+  - Nếu cài đặt bị lỗi 404, cài đặt DCGM thủ công:
+    ```bash
+    # Cài đặt repository NVIDIA
+    distribution=$(. /etc/os-release;echo $ID$VERSION_ID | sed -e 's/\.//g')
+    wget https://developer.download.nvidia.com/compute/cuda/repos/$distribution/x86_64/cuda-keyring_1.0-1_all.deb
+    sudo dpkg -i cuda-keyring_1.0-1_all.deb
+    sudo apt-get update
+
+    # Cài đặt DCGM
+    sudo apt-get install -y datacenter-gpu-manager
+
+    # Cài đặt DCGM Exporter
+    wget https://raw.githubusercontent.com/NVIDIA/dcgm-exporter/main/dcgm-exporter
+    chmod +x dcgm-exporter
+    sudo mv dcgm-exporter /usr/local/bin/
+    ```
 
 ### Hướng dẫn cấu hình thêm target
 
