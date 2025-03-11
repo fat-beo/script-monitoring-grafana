@@ -848,36 +848,34 @@ install_nvidia_prometheus() {
         sudo apt-get install -y wget
     fi
     
-    # 3. Download and install DCGM package
-    echo -e "\n${YELLOW}Downloading and installing DCGM package...${NC}"
-    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/nvidia-dcgm_3.3.1_amd64.deb
-    sudo dpkg -i nvidia-dcgm_3.3.1_amd64.deb
+    # 3. Add NVIDIA repository
+    echo -e "\n${YELLOW}Adding NVIDIA repository...${NC}"
+    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.0-1_all.deb
+    sudo dpkg -i cuda-keyring_1.0-1_all.deb
+    sudo apt update
     
-    # 4. Download and install DCGM run file
-    echo -e "\n${YELLOW}Downloading and installing DCGM run file...${NC}"
-    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/NVIDIA-Linux-x86_64-DCGM.run
-    chmod +x NVIDIA-Linux-x86_64-DCGM.run
-    sudo ./NVIDIA-Linux-x86_64-DCGM.run
+    # 4. Install DCGM
+    echo -e "\n${YELLOW}Installing DCGM...${NC}"
+    sudo apt-get install -y datacenter-gpu-manager
     
-    # 5. Start and enable DCGM service
-    echo -e "\n${YELLOW}Starting and enabling DCGM service...${NC}"
-    sudo systemctl start nvidia-dcgm
-    sudo systemctl enable nvidia-dcgm
+    # 5. Download and install DCGM Exporter
+    echo -e "\n${YELLOW}Downloading and installing DCGM Exporter...${NC}"
+    DCGM_EXPORTER_VERSION=$(curl -s https://api.github.com/repos/NVIDIA/dcgm-exporter/releases/latest | grep tag_name | cut -d '"' -f 4)
+    wget https://github.com/NVIDIA/dcgm-exporter/releases/download/${DCGM_EXPORTER_VERSION}/dcgm-exporter-${DCGM_EXPORTER_VERSION#v}.tar.gz
+    tar xvf dcgm-exporter-*.tar.gz
+    sudo cp dcgm-exporter-*/dcgm-exporter /usr/bin/
+    rm -rf dcgm-exporter-*
     
-    # 6. Start DCGM Exporter
-    echo -e "\n${YELLOW}Starting DCGM Exporter...${NC}"
-    /usr/bin/dcgm-exporter &
-    
-    # 7. Create systemd service for DCGM Exporter
+    # 6. Create systemd service for DCGM Exporter
     echo -e "\n${YELLOW}Creating systemd service for DCGM Exporter...${NC}"
-    sudo tee /etc/systemd/system/dcgm-exporter.service > /dev/null << 'EOF'
+    sudo tee /etc/systemd/system/dcgm-exporter.service > /dev/null << EOF
 [Unit]
 Description=NVIDIA DCGM Exporter
-After=network.target nvidia-dcgm.service
+After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/bin/dcgm-exporter
+ExecStart=/usr/bin/dcgm-exporter --log-level=INFO --addr 0.0.0.0:${NVIDIA_EXPORTER_PORT}
 Restart=always
 RestartSec=10
 
@@ -885,17 +883,17 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
     
-    # 8. Start and enable DCGM Exporter service
+    # 7. Start and enable DCGM Exporter service
     echo -e "\n${YELLOW}Starting and enabling DCGM Exporter service...${NC}"
     sudo systemctl daemon-reload
     sudo systemctl enable dcgm-exporter
     sudo systemctl start dcgm-exporter
     
-    # 9. Configure firewall
+    # 8. Configure firewall
     echo -e "\n${YELLOW}Configuring firewall...${NC}"
     open_port "$NVIDIA_EXPORTER_PORT"
     
-    # 10. Add to Prometheus config
+    # 9. Add to Prometheus config
     echo -e "\n${YELLOW}Adding to Prometheus config...${NC}"
     # Check if promtool exists
     if ! command -v promtool &> /dev/null; then
@@ -910,9 +908,9 @@ EOF
     # Add job to Prometheus config
     add_prometheus_job "nvidia_gpu" "$NVIDIA_EXPORTER_PORT"
     
-    # 11. Check installation
+    # 10. Check installation
     echo -e "\n${YELLOW}Checking installation...${NC}"
-    if systemctl is-active --quiet dcgm-exporter && systemctl is-active --quiet nvidia-dcgm; then
+    if systemctl is-active --quiet dcgm-exporter; then
         echo -e "${GREEN}NVIDIA Prometheus Exporter has been installed successfully!${NC}"
         echo -e "Access metrics at: http://localhost:$NVIDIA_EXPORTER_PORT/metrics"
         return 0
