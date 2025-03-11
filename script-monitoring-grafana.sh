@@ -404,9 +404,12 @@ install_grafana() {
     
     # Install Grafana
     if sudo apt install grafana -y; then
-        # Configure Grafana port and address
-        sudo sed -i "s/;http_port = 3000/http_port = $GRAFANA_PORT/" /etc/grafana/grafana.ini
-        sudo sed -i "s/;http_addr = /http_addr = 0.0.0.0/" /etc/grafana/grafana.ini
+        # Copy and update config file
+        if [ -f "configs/grafana.ini" ]; then
+            sudo cp configs/grafana.ini /etc/grafana/grafana.ini
+            update_config_files
+        fi
+        
         sudo systemctl restart grafana-server
         
         # Open port
@@ -452,15 +455,10 @@ install_prometheus() {
     rm -rf prometheus-*
     
     # Configure Prometheus
-    cat << EOF | sudo tee /etc/prometheus/prometheus.yml
-global:
-  scrape_interval: 15s
-
-scrape_configs:
-  - job_name: 'prometheus'
-    static_configs:
-      - targets: ['0.0.0.0:$PROMETHEUS_PORT']
-EOF
+    if [ -f "configs/prometheus.yml" ]; then
+        sudo cp configs/prometheus.yml /etc/prometheus/prometheus.yml
+        update_config_files
+    fi
 
     # Create systemd service
     cat << EOF | sudo tee /etc/systemd/system/prometheus.service
@@ -581,28 +579,11 @@ install_promtail() {
     # Create config directory
     sudo mkdir -p /etc/promtail
     
-    # Create config file
-    cat << EOF | sudo tee /etc/promtail/config.yml
-server:
-  http_listen_address: 0.0.0.0
-  http_listen_port: $PROMTAIL_PORT
-  grpc_listen_port: 0
-
-positions:
-  filename: /tmp/positions.yaml
-
-clients:
-  - url: http://0.0.0.0:$LOKI_PORT/loki/api/v1/push
-
-scrape_configs:
-  - job_name: system
-    static_configs:
-    - targets:
-        - 0.0.0.0
-      labels:
-        job: varlogs
-        __path__: /var/log/*log
-EOF
+    # Copy and update config file
+    if [ -f "configs/promtail.yml" ]; then
+        sudo cp configs/promtail.yml /etc/promtail/config.yml
+        update_config_files
+    fi
 
     # Create systemd service
     cat << EOF | sudo tee /etc/systemd/system/promtail.service
@@ -655,47 +636,11 @@ install_loki() {
     # Create config directory
     sudo mkdir -p /etc/loki
     
-    # Create config file
-    cat << EOF | sudo tee /etc/loki/config.yml
-auth_enabled: false
-
-server:
-  http_listen_address: 0.0.0.0
-  http_listen_port: $LOKI_PORT
-
-ingester:
-  lifecycler:
-    address: 0.0.0.0
-    ring:
-      kvstore:
-        store: inmemory
-      replication_factor: 1
-    final_sleep: 0s
-  chunk_idle_period: 5m
-  chunk_retain_period: 30s
-
-schema_config:
-  configs:
-    - from: 2020-05-15
-      store: boltdb
-      object_store: filesystem
-      schema: v11
-      index:
-        prefix: index_
-        period: 168h
-
-storage_config:
-  boltdb:
-    directory: /tmp/loki/index
-
-  filesystem:
-    directory: /tmp/loki/chunks
-
-limits_config:
-  enforce_metric_name: false
-  reject_old_samples: true
-  reject_old_samples_max_age: 168h
-EOF
+    # Copy and update config file
+    if [ -f "configs/loki.yml" ]; then
+        sudo cp configs/loki.yml /etc/loki/config.yml
+        update_config_files
+    fi
 
     # Create systemd service
     cat << EOF | sudo tee /etc/systemd/system/loki.service
