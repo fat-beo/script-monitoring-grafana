@@ -834,32 +834,37 @@ EOF
 install_nvidia_prometheus() {
     echo -e "${YELLOW}Installing NVIDIA Prometheus Exporter...${NC}"
     
-    # Cleanup old installation
-    echo -e "${YELLOW}Cleaning up old nvidia_exporter installation...${NC}"
-    sudo systemctl stop nvidia-exporter 2>/dev/null
-    sudo rm -f /usr/local/bin/nvidia_exporter
-    sudo rm -f /etc/systemd/system/nvidia-exporter.service
-    sudo systemctl daemon-reload
+    # 1. Cleanup old installation
+    echo -e "\n${YELLOW}Cleaning up old installation...${NC}"
+    cleanup_component "nvidia_exporter" "$NVIDIA_EXPORTER_PORT"
     
-    # Install prerequisites
-    echo -e "${YELLOW}Installing prerequisites...${NC}"
-    sudo apt-get update
-    sudo apt-get install -y git golang-go build-essential
+    # 2. Check prerequisites
+    echo -e "\n${YELLOW}Checking prerequisites...${NC}"
+    if ! command -v git &> /dev/null; then
+        sudo apt-get install -y git
+    fi
+    if ! command -v golang-go &> /dev/null; then
+        sudo apt-get install -y golang-go
+    fi
+    if ! command -v build-essential &> /dev/null; then
+        sudo apt-get install -y build-essential
+    fi
     
-    # Clone repository
-    echo -e "${YELLOW}Cloning DCGM Exporter repository...${NC}"
+    # 3. Clone repository
+    echo -e "\n${YELLOW}Cloning DCGM Exporter repository...${NC}"
     git clone https://github.com/NVIDIA/dcgm-exporter.git
     cd dcgm-exporter
     
-    # Build binary
-    echo -e "${YELLOW}Building DCGM Exporter...${NC}"
+    # 4. Build binary
+    echo -e "\n${YELLOW}Building DCGM Exporter...${NC}"
     make binary
     
-    # Install binary
-    echo -e "${YELLOW}Installing DCGM Exporter...${NC}"
+    # 5. Install binary
+    echo -e "\n${YELLOW}Installing DCGM Exporter...${NC}"
     sudo make install
     
-    # Create systemd service
+    # 6. Create systemd service
+    echo -e "\n${YELLOW}Creating systemd service...${NC}"
     sudo tee /etc/systemd/system/dcgm-exporter.service > /dev/null << 'EOF'
 [Unit]
 Description=NVIDIA DCGM Exporter
@@ -875,23 +880,39 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
     
-    # Start and enable service
+    # 7. Start and enable service
+    echo -e "\n${YELLOW}Starting and enabling service...${NC}"
     sudo systemctl daemon-reload
     sudo systemctl enable dcgm-exporter
     sudo systemctl start dcgm-exporter
     
-    # Add to Prometheus config
-    add_prometheus_job "nvidia_gpu" $NVIDIA_EXPORTER_PORT
+    # 8. Configure firewall
+    echo -e "\n${YELLOW}Configuring firewall...${NC}"
+    open_port "$NVIDIA_EXPORTER_PORT"
     
-    # Open port
-    open_port $NVIDIA_EXPORTER_PORT
+    # 9. Add to Prometheus config
+    echo -e "\n${YELLOW}Adding to Prometheus config...${NC}"
+    # Check if promtool exists
+    if ! command -v promtool &> /dev/null; then
+        echo -e "${YELLOW}Installing promtool...${NC}"
+        PROMETHEUS_VERSION=$(curl -s https://api.github.com/repos/prometheus/prometheus/releases/latest | grep tag_name | cut -d '"' -f 4)
+        wget https://github.com/prometheus/prometheus/releases/download/${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION#v}.linux-amd64.tar.gz
+        tar xvf prometheus-*.tar.gz
+        sudo cp prometheus-*/promtool /usr/local/bin/
+        rm -rf prometheus-*
+    fi
     
-    if sudo systemctl is-active --quiet dcgm-exporter; then
-        echo -e "${GREEN}NVIDIA Prometheus Exporter installed successfully!${NC}"
-        echo -e "${GREEN}You can access metrics at http://localhost:$NVIDIA_EXPORTER_PORT/metrics${NC}"
+    # Add job to Prometheus config
+    add_prometheus_job "nvidia_gpu" "$NVIDIA_EXPORTER_PORT"
+    
+    # 10. Check installation
+    echo -e "\n${YELLOW}Checking installation...${NC}"
+    if systemctl is-active --quiet dcgm-exporter; then
+        echo -e "${GREEN}NVIDIA Prometheus Exporter has been installed successfully!${NC}"
+        echo -e "Access metrics at: http://localhost:$NVIDIA_EXPORTER_PORT/metrics"
         return 0
     else
-        echo -e "${RED}Failed to install NVIDIA Prometheus Exporter.${NC}"
+        echo -e "${RED}Failed to install NVIDIA Prometheus Exporter. Please check the logs.${NC}"
         return 1
     fi
 }
