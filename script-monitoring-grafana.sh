@@ -344,14 +344,6 @@ cleanup_component() {
             fi
             ;;
         "nvidia_exporter")
-            # Cleanup DCGM Exporter
-            if [ -f "/usr/local/bin/dcgm-exporter" ] || [ -f "/usr/bin/dcgm-exporter" ]; then
-                sudo systemctl stop dcgm-exporter || true
-                sudo systemctl disable dcgm-exporter || true
-                sudo rm -f /usr/local/bin/dcgm-exporter
-                sudo rm -f /usr/bin/dcgm-exporter
-                sudo rm -f /etc/systemd/system/dcgm-exporter.service
-            fi
             # Cleanup SMI Exporter
             if [ -f "/usr/local/bin/nvidia_gpu_exporter" ]; then
                 sudo systemctl stop nvidia-smi-exporter || true
@@ -359,13 +351,6 @@ cleanup_component() {
                 sudo rm -f /usr/local/bin/nvidia_gpu_exporter
                 sudo rm -f /etc/systemd/system/nvidia-smi-exporter.service
                 sudo userdel nvidia-smi-exporter || true
-            fi
-            # Clean up DCGM if installed
-            if dpkg -l | grep -q datacenter-gpu-manager; then
-                sudo apt-get remove --purge datacenter-gpu-manager -y
-            fi
-            if dpkg -l | grep -q nvidia-dcgm; then
-                sudo apt-get remove --purge nvidia-dcgm -y
             fi
             close_port $port
             ;;
@@ -954,17 +939,13 @@ remove_all_components() {
     
     # 3. Xóa các gói phần mềm
     echo -e "\n${YELLOW}Removing packages...${NC}"
-    sudo apt-get remove --purge -y grafana datacenter-gpu-manager nvidia-dcgm || true
+    sudo apt-get remove --purge -y grafana || true
     sudo apt-get autoremove -y
     
     # 4. Xóa các repository và GPG keys
     echo -e "\n${YELLOW}Removing repositories and GPG keys...${NC}"
     sudo rm -f /etc/apt/sources.list.d/grafana.list
-    sudo rm -f /etc/apt/sources.list.d/nvidia-docker.list
-    sudo rm -f /etc/apt/sources.list.d/cuda*.list
     sudo rm -f /etc/apt/trusted.gpg.d/grafana.gpg
-    sudo rm -f /etc/apt/trusted.gpg.d/nvidia-docker.gpg
-    sudo rm -f /etc/apt/trusted.gpg.d/cuda*.gpg
     
     # 5. Xóa các thư mục cấu hình
     echo -e "\n${YELLOW}Removing configuration directories...${NC}"
@@ -972,14 +953,12 @@ remove_all_components() {
     sudo rm -rf /etc/prometheus
     sudo rm -rf /etc/promtail
     sudo rm -rf /etc/loki
-    sudo rm -rf /etc/dcgm-exporter
     
     # 6. Xóa các thư mục dữ liệu
     echo -e "\n${YELLOW}Removing data directories...${NC}"
     sudo rm -rf /var/lib/grafana
     sudo rm -rf /var/lib/prometheus
     sudo rm -rf /var/lib/loki
-    sudo rm -rf /var/lib/dcgm
     
     # 7. Xóa các thư mục log
     echo -e "\n${YELLOW}Removing log directories...${NC}"
@@ -988,7 +967,6 @@ remove_all_components() {
     sudo rm -rf /var/log/node_exporter
     sudo rm -rf /var/log/loki
     sudo rm -rf /var/log/promtail
-    sudo rm -rf /var/log/dcgm
     
     # 8. Xóa các binary files
     echo -e "\n${YELLOW}Removing binary files...${NC}"
