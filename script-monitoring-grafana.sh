@@ -425,6 +425,51 @@ download_configs() {
     fi
 }
 
+# Function to check if a Prometheus job already exists
+check_prometheus_job_exists() {
+    local job_name=$1
+    if [ -f "/etc/prometheus/prometheus.yml" ]; then
+        if grep -q "job_name: '$job_name'" "/etc/prometheus/prometheus.yml"; then
+            return 0 # Job exists
+        fi
+    fi
+    return 1 # Job does not exist
+}
+
+# Function to add job to Prometheus config
+add_prometheus_job() {
+    local job_name=$1
+    local port=$2
+    
+    if [ -f "/etc/prometheus/prometheus.yml" ]; then
+        # Check if job already exists
+        if check_prometheus_job_exists "$job_name"; then
+            echo -e "${YELLOW}Job '$job_name' already exists in Prometheus config${NC}"
+            return 0
+        fi
+        
+        # Create backup
+        sudo cp /etc/prometheus/prometheus.yml /etc/prometheus/prometheus.yml.bak
+        
+        # Add job with proper indentation and quotes
+        echo "
+  - job_name: '$job_name'
+    static_configs:
+      - targets: ['0.0.0.0:${port}']" | sudo tee -a /etc/prometheus/prometheus.yml
+
+        # Verify syntax
+        if /usr/local/bin/promtool check config /etc/prometheus/prometheus.yml; then
+            echo -e "${GREEN}Added $job_name job to Prometheus config${NC}"
+            sudo systemctl restart prometheus
+            return 0
+        else
+            echo -e "${RED}Invalid Prometheus config. Restoring backup...${NC}"
+            sudo mv /etc/prometheus/prometheus.yml.bak /etc/prometheus/prometheus.yml
+            return 1
+        fi
+    fi
+}
+
 # Function to install Grafana
 install_grafana() {
     echo -e "${YELLOW}Installing Grafana...${NC}"
@@ -581,27 +626,8 @@ EOF
     sudo systemctl start node_exporter
     sudo systemctl enable node_exporter
     
-    # Add to Prometheus config with proper syntax checking
-    if [ -f "/etc/prometheus/prometheus.yml" ]; then
-        # Create backup
-        sudo cp /etc/prometheus/prometheus.yml /etc/prometheus/prometheus.yml.bak
-        
-        # Add job with proper indentation and quotes
-        echo "
-  - job_name: 'node'
-    static_configs:
-      - targets: ['0.0.0.0:${NODE_EXPORTER_PORT}']" | sudo tee -a /etc/prometheus/prometheus.yml
-
-        # Verify syntax
-        if /usr/local/bin/promtool check config /etc/prometheus/prometheus.yml; then
-            echo -e "${GREEN}Added Node Exporter job to Prometheus config${NC}"
-            sudo systemctl restart prometheus
-        else
-            echo -e "${RED}Invalid Prometheus config. Restoring backup...${NC}"
-            sudo mv /etc/prometheus/prometheus.yml.bak /etc/prometheus/prometheus.yml
-            return 1
-        fi
-    fi
+    # Add to Prometheus config
+    add_prometheus_job "node" $NODE_EXPORTER_PORT
     
     # Open port
     open_port $NODE_EXPORTER_PORT
@@ -729,9 +755,40 @@ install_nvidia_prometheus() {
         echo -e "${RED}NVIDIA drivers are not installed. Please install drivers first.${NC}"
         return 1
     fi
+
+    # Install DCGM first
+    echo -e "${YELLOW}Installing NVIDIA DCGM...${NC}"
+    distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
+    curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
+    curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
+    sudo apt-get update
+    sudo apt-get install -y datacenter-gpu-manager
+
+    # Start DCGM service
+    sudo systemctl --now enable nvidia-dcgm
+
+    # Wait for DCGM to start
+    sleep 5
     
     # Download DCGM Exporter
-    wget https://github.com/NVIDIA/dcgm-exporter/releases/latest/download/dcgm-exporter
+    echo -e "${YELLOW}Downloading DCGM Exporter...${NC}"
+    if ! wget -q https://github.com/NVIDIA/dcgm-exporter/releases/latest/download/dcgm-exporter; then
+        echo -e "${RED}Failed to download DCGM Exporter. Trying alternative download method...${NC}"
+        # Try to get the latest version number
+        DCGM_VERSION=$(curl -s https://api.github.com/repos/NVIDIA/dcgm-exporter/releases/latest | grep tag_name | cut -d '"' -f 4)
+        if [ -n "$DCGM_VERSION" ]; then
+            wget -q https://github.com/NVIDIA/dcgm-exporter/releases/download/${DCGM_VERSION}/dcgm-exporter
+        else
+            echo -e "${RED}Failed to determine latest DCGM Exporter version.${NC}"
+            return 1
+        fi
+    fi
+
+    if [ ! -f "dcgm-exporter" ]; then
+        echo -e "${RED}Failed to download DCGM Exporter.${NC}"
+        return 1
+    fi
+
     chmod +x dcgm-exporter
     sudo mv dcgm-exporter /usr/local/bin/
     
@@ -740,7 +797,7 @@ install_nvidia_prometheus() {
 [Unit]
 Description=NVIDIA DCGM Exporter
 Wants=network-online.target
-After=network-online.target
+After=network-online.target nvidia-dcgm.service
 
 [Service]
 Type=simple
@@ -755,27 +812,8 @@ EOF
     sudo systemctl start dcgm-exporter
     sudo systemctl enable dcgm-exporter
     
-    # Add to Prometheus config with proper syntax checking
-    if [ -f "/etc/prometheus/prometheus.yml" ]; then
-        # Create backup
-        sudo cp /etc/prometheus/prometheus.yml /etc/prometheus/prometheus.yml.bak
-        
-        # Add job with proper indentation and quotes
-        echo "
-  - job_name: 'nvidia_gpu'
-    static_configs:
-      - targets: ['0.0.0.0:${NVIDIA_EXPORTER_PORT}']" | sudo tee -a /etc/prometheus/prometheus.yml
-
-        # Verify syntax
-        if /usr/local/bin/promtool check config /etc/prometheus/prometheus.yml; then
-            echo -e "${GREEN}Added NVIDIA Exporter job to Prometheus config${NC}"
-            sudo systemctl restart prometheus
-        else
-            echo -e "${RED}Invalid Prometheus config. Restoring backup...${NC}"
-            sudo mv /etc/prometheus/prometheus.yml.bak /etc/prometheus/prometheus.yml
-            return 1
-        fi
-    fi
+    # Add to Prometheus config
+    add_prometheus_job "nvidia_gpu" $NVIDIA_EXPORTER_PORT
     
     # Open port
     open_port $NVIDIA_EXPORTER_PORT
