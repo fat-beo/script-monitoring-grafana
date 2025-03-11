@@ -99,6 +99,8 @@ configure_ports() {
         # Update firewall rules
         close_port $old_grafana_port
         open_port $GRAFANA_PORT
+    else
+        echo -e "${YELLOW}Grafana is not installed. Port configuration will be applied when Grafana is installed.${NC}"
     fi
     
     # Update Prometheus configuration if installed
@@ -122,6 +124,8 @@ configure_ports() {
         # Update firewall rules
         close_port $old_prometheus_port
         open_port $PROMETHEUS_PORT
+    else
+        echo -e "${YELLOW}Prometheus is not installed. Port configuration will be applied when Prometheus is installed.${NC}"
     fi
     
     # Update Node Exporter configuration if installed
@@ -132,6 +136,8 @@ configure_ports() {
         # Update firewall rules
         close_port $old_node_exporter_port
         open_port $NODE_EXPORTER_PORT
+    else
+        echo -e "${YELLOW}Node Exporter is not installed. Port configuration will be applied when Node Exporter is installed.${NC}"
     fi
     
     # Update Promtail configuration if installed
@@ -143,6 +149,8 @@ configure_ports() {
         # Update firewall rules
         close_port $old_promtail_port
         open_port $PROMTAIL_PORT
+    else
+        echo -e "${YELLOW}Promtail is not installed. Port configuration will be applied when Promtail is installed.${NC}"
     fi
     
     # Update Loki configuration if installed
@@ -153,6 +161,8 @@ configure_ports() {
         # Update firewall rules
         close_port $old_loki_port
         open_port $LOKI_PORT
+    else
+        echo -e "${YELLOW}Loki is not installed. Port configuration will be applied when Loki is installed.${NC}"
     fi
     
     # Update NVIDIA Exporter configuration if installed
@@ -163,9 +173,12 @@ configure_ports() {
         # Update firewall rules
         close_port $old_nvidia_exporter_port
         open_port $NVIDIA_EXPORTER_PORT
+    else
+        echo -e "${YELLOW}NVIDIA Exporter is not installed. Port configuration will be applied when NVIDIA Exporter is installed.${NC}"
     fi
     
     echo -e "${GREEN}Ports configured successfully!${NC}"
+    echo -e "${YELLOW}Note: Port configurations will be applied when the respective components are installed.${NC}"
 }
 
 # Function to open port
