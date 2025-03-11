@@ -75,26 +75,31 @@ update_config_files() {
     
     # Update Prometheus config
     if [ -f "/etc/prometheus/prometheus.yml" ]; then
-        envsubst < prometheus.yml | sudo tee /etc/prometheus/prometheus.yml > /dev/null
+        envsubst < "/etc/prometheus/prometheus.yml" | sudo tee "/etc/prometheus/prometheus.yml.tmp" > /dev/null
+        sudo mv "/etc/prometheus/prometheus.yml.tmp" "/etc/prometheus/prometheus.yml"
         sudo chown prometheus:prometheus /etc/prometheus/prometheus.yml
         echo -e "${GREEN}Updated Prometheus configuration${NC}"
     fi
     
     # Update Loki config
     if [ -f "/etc/loki/config.yml" ]; then
-        envsubst < loki.yml | sudo tee /etc/loki/config.yml > /dev/null
+        envsubst < "/etc/loki/config.yml" | sudo tee "/etc/loki/config.yml.tmp" > /dev/null
+        sudo mv "/etc/loki/config.yml.tmp" "/etc/loki/config.yml"
         echo -e "${GREEN}Updated Loki configuration${NC}"
     fi
     
     # Update Promtail config
     if [ -f "/etc/promtail/config.yml" ]; then
-        envsubst < promtail.yml | sudo tee /etc/promtail/config.yml > /dev/null
+        envsubst < "/etc/promtail/config.yml" | sudo tee "/etc/promtail/config.yml.tmp" > /dev/null
+        sudo mv "/etc/promtail/config.yml.tmp" "/etc/promtail/config.yml"
         echo -e "${GREEN}Updated Promtail configuration${NC}"
     fi
     
     # Update Grafana config
     if [ -f "/etc/grafana/grafana.ini" ]; then
-        envsubst < grafana.ini | sudo tee /etc/grafana/grafana.ini > /dev/null
+        envsubst < "/etc/grafana/grafana.ini" | sudo tee "/etc/grafana/grafana.ini.tmp" > /dev/null
+        sudo mv "/etc/grafana/grafana.ini.tmp" "/etc/grafana/grafana.ini"
+        sudo chown grafana:grafana /etc/grafana/grafana.ini
         echo -e "${GREEN}Updated Grafana configuration${NC}"
     fi
     
@@ -359,26 +364,64 @@ download_configs() {
     # Create config directory if not exists
     mkdir -p configs
     
+    # Define base URL for raw config files
+    local base_url="https://raw.githubusercontent.com/nhduo1882/script-monitoring-grafana/main/configs"
+    local config_file=""
+    local target_path=""
+    
     case $component in
         "grafana")
-            wget -q https://raw.githubusercontent.com/fat-beo/script-monitoring-grafana/main/configs/grafana.ini -O configs/grafana.ini
+            config_file="grafana.ini"
+            target_path="/etc/grafana/grafana.ini"
             ;;
         "prometheus")
-            wget -q https://raw.githubusercontent.com/fat-beo/script-monitoring-grafana/main/configs/prometheus.yml -O configs/prometheus.yml
+            config_file="prometheus.yml"
+            target_path="/etc/prometheus/prometheus.yml"
             ;;
         "promtail")
-            wget -q https://raw.githubusercontent.com/fat-beo/script-monitoring-grafana/main/configs/promtail.yml -O configs/promtail.yml
+            config_file="promtail.yml"
+            target_path="/etc/promtail/config.yml"
             ;;
         "loki")
-            wget -q https://raw.githubusercontent.com/fat-beo/script-monitoring-grafana/main/configs/loki.yml -O configs/loki.yml
+            config_file="loki.yml"
+            target_path="/etc/loki/config.yml"
             ;;
     esac
     
-    if [ $? -eq 0 ]; then
+    # Download configuration file
+    if wget -q "$base_url/$config_file" -O "configs/$config_file"; then
         echo -e "${GREEN}Configuration file for $component downloaded successfully!${NC}"
+        
+        # Create directory if it doesn't exist
+        sudo mkdir -p $(dirname $target_path)
+        
+        # Copy configuration file to target location
+        sudo cp "configs/$config_file" "$target_path"
+        
+        # Set correct permissions
+        case $component in
+            "prometheus")
+                sudo chown prometheus:prometheus "$target_path"
+                ;;
+            "grafana")
+                sudo chown grafana:grafana "$target_path"
+                ;;
+        esac
+        
+        # Update port values in configuration
+        export GRAFANA_PORT
+        export PROMETHEUS_PORT
+        export NODE_EXPORTER_PORT
+        export PROMTAIL_PORT
+        export LOKI_PORT
+        export NVIDIA_EXPORTER_PORT
+        
+        envsubst < "configs/$config_file" | sudo tee "$target_path" > /dev/null
+        
+        echo -e "${GREEN}Configuration file installed at $target_path${NC}"
         return 0
     else
-        echo -e "${RED}Failed to download configuration file for $component${NC}"
+        echo -e "${RED}Failed to download configuration file for $component.${NC}"
         return 1
     fi
 }
@@ -390,8 +433,11 @@ install_grafana() {
     # Cleanup old installation
     cleanup_component "grafana" $GRAFANA_PORT
     
-    # Download config file
-    download_configs "grafana"
+    # Download config file first
+    if ! download_configs "grafana"; then
+        echo -e "${RED}Failed to download Grafana configuration. Installation aborted.${NC}"
+        return 1
+    fi
     
     # Add Grafana GPG key
     wget -q -O - https://packages.grafana.com/gpg.key | sudo apt-key add -
@@ -404,12 +450,6 @@ install_grafana() {
     
     # Install Grafana
     if sudo apt install grafana -y; then
-        # Copy and update config file
-        if [ -f "configs/grafana.ini" ]; then
-            sudo cp configs/grafana.ini /etc/grafana/grafana.ini
-            update_config_files
-        fi
-        
         sudo systemctl restart grafana-server
         
         # Open port
@@ -430,8 +470,11 @@ install_prometheus() {
     # Cleanup old installation
     cleanup_component "prometheus" $PROMETHEUS_PORT
     
-    # Download config file
-    download_configs "prometheus"
+    # Download config file first
+    if ! download_configs "prometheus"; then
+        echo -e "${RED}Failed to download Prometheus configuration. Installation aborted.${NC}"
+        return 1
+    fi
     
     # Create prometheus user
     sudo useradd --no-create-home --shell /bin/false prometheus
@@ -453,12 +496,6 @@ install_prometheus() {
     sudo cp -r console_libraries/ /etc/prometheus
     cd ..
     rm -rf prometheus-*
-    
-    # Configure Prometheus
-    if [ -f "configs/prometheus.yml" ]; then
-        sudo cp configs/prometheus.yml /etc/prometheus/prometheus.yml
-        update_config_files
-    fi
 
     # Create systemd service
     cat << EOF | sudo tee /etc/systemd/system/prometheus.service
@@ -567,23 +604,17 @@ install_promtail() {
     # Cleanup old installation
     cleanup_component "promtail" $PROMTAIL_PORT
     
-    # Download config file
-    download_configs "promtail"
+    # Download config file first
+    if ! download_configs "promtail"; then
+        echo -e "${RED}Failed to download Promtail configuration. Installation aborted.${NC}"
+        return 1
+    fi
     
     # Download Promtail
     LOKI_VERSION=$(curl -s https://api.github.com/repos/grafana/loki/releases/latest | grep tag_name | cut -d '"' -f 4)
     wget https://github.com/grafana/loki/releases/download/${LOKI_VERSION}/promtail-linux-amd64.zip
     unzip promtail-linux-amd64.zip
     sudo mv promtail-linux-amd64 /usr/local/bin/promtail
-    
-    # Create config directory
-    sudo mkdir -p /etc/promtail
-    
-    # Copy and update config file
-    if [ -f "configs/promtail.yml" ]; then
-        sudo cp configs/promtail.yml /etc/promtail/config.yml
-        update_config_files
-    fi
 
     # Create systemd service
     cat << EOF | sudo tee /etc/systemd/system/promtail.service
@@ -624,8 +655,11 @@ install_loki() {
     # Cleanup old installation
     cleanup_component "loki" $LOKI_PORT
     
-    # Download config file
-    download_configs "loki"
+    # Download config file first
+    if ! download_configs "loki"; then
+        echo -e "${RED}Failed to download Loki configuration. Installation aborted.${NC}"
+        return 1
+    fi
     
     # Download Loki
     LOKI_VERSION=$(curl -s https://api.github.com/repos/grafana/loki/releases/latest | grep tag_name | cut -d '"' -f 4)
@@ -633,15 +667,6 @@ install_loki() {
     unzip loki-linux-amd64.zip
     sudo mv loki-linux-amd64 /usr/local/bin/loki
     
-    # Create config directory
-    sudo mkdir -p /etc/loki
-    
-    # Copy and update config file
-    if [ -f "configs/loki.yml" ]; then
-        sudo cp configs/loki.yml /etc/loki/config.yml
-        update_config_files
-    fi
-
     # Create systemd service
     cat << EOF | sudo tee /etc/systemd/system/loki.service
 [Unit]
