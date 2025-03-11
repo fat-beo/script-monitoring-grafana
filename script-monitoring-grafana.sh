@@ -862,106 +862,103 @@ install_nvidia_prometheus() {
     echo -e "${YELLOW}Installing NVIDIA Prometheus Exporter...${NC}"
     
     # Cleanup old installation
-    cleanup_component "nvidia_exporter" $NVIDIA_EXPORTER_PORT
+    echo -e "${YELLOW}Cleaning up old nvidia_exporter installation...${NC}"
+    sudo systemctl stop nvidia-exporter 2>/dev/null
+    sudo rm -f /usr/local/bin/nvidia_exporter
+    sudo rm -f /etc/systemd/system/nvidia-exporter.service
+    sudo systemctl daemon-reload
     
-    # Check if NVIDIA drivers are installed
-    if ! command -v nvidia-smi &> /dev/null; then
-        echo -e "${RED}NVIDIA drivers are not installed. Please install drivers first.${NC}"
-        return 1
-    fi
-
-    # Install DCGM first
+    # Install NVIDIA DCGM
     echo -e "${YELLOW}Installing NVIDIA DCGM...${NC}"
     
-    # Add NVIDIA Container Toolkit repository
-    curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
-    curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
-        sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
-        sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
+    # Add NVIDIA repository
+    distribution=$(. /etc/os-release;echo $ID$VERSION_ID) \
+    && curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add - \
+    && curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
     
-    # Update package list and install DCGM
+    # Update package list
     sudo apt-get update
+    
+    # Install DCGM
     if ! sudo apt-get install -y datacenter-gpu-manager; then
-        echo -e "${RED}Failed to install DCGM. Installation aborted.${NC}"
-        return 1
-    fi
-
-    # Create DCGM service file if it doesn't exist
-    if [ ! -f "/etc/systemd/system/nvidia-dcgm.service" ]; then
-        cat << EOF | sudo tee /etc/systemd/system/nvidia-dcgm.service
-[Unit]
-Description=NVIDIA Data Center GPU Manager
-After=syslog.target network.target
-
-[Service]
-Type=forking
-ExecStart=/usr/bin/nv-hostengine -b
-ExecStopPost=/usr/bin/nv-hostengine -t
-Restart=on-abort
-
-[Install]
-WantedBy=multi-user.target
-EOF
-    fi
-
-    # Start DCGM service
-    sudo systemctl daemon-reload
-    sudo systemctl enable nvidia-dcgm
-    sudo systemctl start nvidia-dcgm
-
-    # Wait for DCGM to start
-    echo -e "${YELLOW}Waiting for DCGM to start...${NC}"
-    sleep 10
-    
-    # Download DCGM Exporter
-    echo -e "${YELLOW}Downloading DCGM Exporter...${NC}"
-    wget https://raw.githubusercontent.com/NVIDIA/dcgm-exporter/main/dcgm-exporter
-    
-    if [ ! -f "dcgm-exporter" ]; then
-        echo -e "${RED}Failed to download DCGM Exporter. Trying alternative download...${NC}"
-        wget https://github.com/NVIDIA/dcgm-exporter/releases/download/3.1.7/dcgm-exporter
-        if [ ! -f "dcgm-exporter" ]; then
-            echo -e "${RED}Failed to download DCGM Exporter.${NC}"
+        echo -e "${RED}Failed to install DCGM. Trying alternative method...${NC}"
+        
+        # Try installing nvidia-dcgm first
+        if ! sudo apt-get install -y nvidia-dcgm; then
+            echo -e "${RED}Failed to install nvidia-dcgm. Installation aborted.${NC}"
             return 1
         fi
     fi
-
-    chmod +x dcgm-exporter
-    sudo mv dcgm-exporter /usr/local/bin/
     
-    # Create systemd service
-    cat << EOF | sudo tee /etc/systemd/system/dcgm-exporter.service
+    # Create DCGM service file if it doesn't exist
+    if [ ! -f "/etc/systemd/system/nvidia-dcgm.service" ]; then
+        sudo tee /etc/systemd/system/nvidia-dcgm.service > /dev/null << 'EOF'
 [Unit]
-Description=NVIDIA DCGM Exporter
-Wants=network-online.target
-After=network-online.target nvidia-dcgm.service
+Description=NVIDIA Data Center GPU Manager
+After=network.target
 
 [Service]
 Type=simple
-ExecStart=/usr/local/bin/dcgm-exporter --address=0.0.0.0:$NVIDIA_EXPORTER_PORT
+ExecStart=/usr/bin/nv-hostengine
+Restart=always
+RestartSec=10
 
 [Install]
 WantedBy=multi-user.target
 EOF
-
-    # Start service
+    fi
+    
+    # Start and enable DCGM service
     sudo systemctl daemon-reload
-    sudo systemctl start dcgm-exporter
+    sudo systemctl enable nvidia-dcgm
+    sudo systemctl start nvidia-dcgm
+    
+    # Wait for DCGM to start
+    echo -e "${YELLOW}Waiting for DCGM to start...${NC}"
+    sleep 5
+    
+    # Download DCGM Exporter
+    echo -e "${YELLOW}Downloading DCGM Exporter...${NC}"
+    if ! wget -O /tmp/dcgm-exporter.deb https://github.com/NVIDIA/dcgm-exporter/releases/download/v3.1.7/dcgm-exporter-3.1.7-ubuntu20.04-amd64.deb; then
+        echo -e "${RED}Failed to download DCGM Exporter. Installation aborted.${NC}"
+        return 1
+    fi
+    
+    # Install DCGM Exporter
+    if ! sudo dpkg -i /tmp/dcgm-exporter.deb; then
+        echo -e "${RED}Failed to install DCGM Exporter. Installation aborted.${NC}"
+        return 1
+    fi
+    
+    # Create systemd service for DCGM Exporter
+    sudo tee /etc/systemd/system/dcgm-exporter.service > /dev/null << 'EOF'
+[Unit]
+Description=NVIDIA DCGM Exporter
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/dcgm-exporter
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+EOF
+    
+    # Start and enable DCGM Exporter service
+    sudo systemctl daemon-reload
     sudo systemctl enable dcgm-exporter
+    sudo systemctl start dcgm-exporter
     
     # Add to Prometheus config
     add_prometheus_job "nvidia_gpu" $NVIDIA_EXPORTER_PORT
     
-    # Open port
-    open_port $NVIDIA_EXPORTER_PORT
+    # Open port for NVIDIA Exporter
+    sudo ufw allow $NVIDIA_EXPORTER_PORT/tcp
     
-    if sudo systemctl is-active --quiet dcgm-exporter; then
-        echo -e "${GREEN}NVIDIA Prometheus Exporter installed successfully!${NC}"
-        return 0
-    else
-        echo -e "${RED}Failed to install NVIDIA Prometheus Exporter.${NC}"
-        return 1
-    fi
+    echo -e "${GREEN}NVIDIA Prometheus Exporter installed successfully${NC}"
+    echo -e "${GREEN}You can access metrics at http://localhost:$NVIDIA_EXPORTER_PORT/metrics${NC}"
 }
 
 # Function to install NVIDIA SMI Exporter
