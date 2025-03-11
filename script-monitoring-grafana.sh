@@ -858,15 +858,7 @@ install_nvidia_prometheus() {
     echo -e "\n${YELLOW}Installing DCGM...${NC}"
     sudo apt-get install -y datacenter-gpu-manager
     
-    # 5. Download and install DCGM Exporter
-    echo -e "\n${YELLOW}Downloading and installing DCGM Exporter...${NC}"
-    DCGM_EXPORTER_VERSION=$(curl -s https://api.github.com/repos/NVIDIA/dcgm-exporter/releases/latest | grep tag_name | cut -d '"' -f 4)
-    wget https://github.com/NVIDIA/dcgm-exporter/releases/download/${DCGM_EXPORTER_VERSION}/dcgm-exporter-${DCGM_EXPORTER_VERSION#v}.tar.gz
-    tar xvf dcgm-exporter-*.tar.gz
-    sudo cp dcgm-exporter-*/dcgm-exporter /usr/bin/
-    rm -rf dcgm-exporter-*
-    
-    # 6. Create systemd service for DCGM Exporter
+    # 5. Create systemd service for DCGM Exporter
     echo -e "\n${YELLOW}Creating systemd service for DCGM Exporter...${NC}"
     sudo tee /etc/systemd/system/dcgm-exporter.service > /dev/null << EOF
 [Unit]
@@ -883,32 +875,28 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
     
-    # 7. Start and enable DCGM Exporter service
+    # 6. Start and enable DCGM Exporter service
     echo -e "\n${YELLOW}Starting and enabling DCGM Exporter service...${NC}"
     sudo systemctl daemon-reload
     sudo systemctl enable dcgm-exporter
     sudo systemctl start dcgm-exporter
     
-    # 8. Configure firewall
+    # 7. Configure firewall
     echo -e "\n${YELLOW}Configuring firewall...${NC}"
     open_port "$NVIDIA_EXPORTER_PORT"
     
-    # 9. Add to Prometheus config
+    # 8. Add to Prometheus config
     echo -e "\n${YELLOW}Adding to Prometheus config...${NC}"
     # Check if promtool exists
     if ! command -v promtool &> /dev/null; then
-        echo -e "${YELLOW}Installing promtool...${NC}"
-        PROMETHEUS_VERSION=$(curl -s https://api.github.com/repos/prometheus/prometheus/releases/latest | grep tag_name | cut -d '"' -f 4)
-        wget https://github.com/prometheus/prometheus/releases/download/${PROMETHEUS_VERSION}/prometheus-${PROMETHEUS_VERSION#v}.linux-amd64.tar.gz
-        tar xvf prometheus-*.tar.gz
-        sudo cp prometheus-*/promtool /usr/local/bin/
-        rm -rf prometheus-*
+        echo -e "${RED}promtool không được tìm thấy. Vui lòng cài đặt Prometheus trước.${NC}"
+        return 1
     fi
     
     # Add job to Prometheus config
     add_prometheus_job "nvidia_gpu" "$NVIDIA_EXPORTER_PORT"
     
-    # 10. Check installation
+    # 9. Check installation
     echo -e "\n${YELLOW}Checking installation...${NC}"
     if systemctl is-active --quiet dcgm-exporter; then
         echo -e "${GREEN}NVIDIA Prometheus Exporter has been installed successfully!${NC}"
@@ -989,53 +977,131 @@ EOF
 remove_all_components() {
     echo -e "${YELLOW}Removing all monitoring components...${NC}"
     
-    # 1. Danh sách các component và port tương ứng
+    # 1. Dừng và vô hiệu hóa tất cả các dịch vụ
+    echo -e "\n${YELLOW}Stopping and disabling all services...${NC}"
+    local services=(
+        "grafana-server"
+        "prometheus"
+        "node_exporter"
+        "promtail"
+        "loki"
+        "dcgm-exporter"
+        "nvidia-smi-exporter"
+        "nvidia-dcgm"
+    )
+    
+    for service in "${services[@]}"; do
+        if systemctl is-active --quiet $service; then
+            echo -e "Stopping $service..."
+            sudo systemctl stop $service
+            sudo systemctl disable $service
+        fi
+    done
+    
+    # 2. Xóa các thành phần và port tương ứng
     local components=(
         "grafana:$GRAFANA_PORT"
         "prometheus:$PROMETHEUS_PORT"
         "node_exporter:$NODE_EXPORTER_PORT"
         "promtail:$PROMTAIL_PORT"
         "loki:$LOKI_PORT"
-        "dcgm-exporter:$NVIDIA_EXPORTER_PORT"
-        "nvidia-smi-exporter:$NVIDIA_EXPORTER_PORT"
+        "nvidia_exporter:$NVIDIA_EXPORTER_PORT"
     )
     
-    # 2. Dọn dẹp từng component
     for component in "${components[@]}"; do
         IFS=':' read -r name port <<< "$component"
         echo -e "\n${YELLOW}=== Removing $name ===${NC}"
         cleanup_component "$name" "$port"
     done
     
-    # 3. Xóa các repository và GPG keys
+    # 3. Xóa các gói phần mềm
+    echo -e "\n${YELLOW}Removing packages...${NC}"
+    sudo apt-get remove --purge -y grafana datacenter-gpu-manager nvidia-dcgm || true
+    sudo apt-get autoremove -y
+    
+    # 4. Xóa các repository và GPG keys
     echo -e "\n${YELLOW}Removing repositories and GPG keys...${NC}"
     sudo rm -f /etc/apt/sources.list.d/grafana.list
     sudo rm -f /etc/apt/sources.list.d/nvidia-docker.list
+    sudo rm -f /etc/apt/sources.list.d/cuda*.list
     sudo rm -f /etc/apt/trusted.gpg.d/grafana.gpg
     sudo rm -f /etc/apt/trusted.gpg.d/nvidia-docker.gpg
+    sudo rm -f /etc/apt/trusted.gpg.d/cuda*.gpg
     
-    # 4. Xóa các thư mục shared
-    echo -e "\n${YELLOW}Removing shared directories...${NC}"
+    # 5. Xóa các thư mục cấu hình
+    echo -e "\n${YELLOW}Removing configuration directories...${NC}"
+    sudo rm -rf /etc/grafana
+    sudo rm -rf /etc/prometheus
+    sudo rm -rf /etc/promtail
+    sudo rm -rf /etc/loki
+    sudo rm -rf /etc/dcgm-exporter
+    
+    # 6. Xóa các thư mục dữ liệu
+    echo -e "\n${YELLOW}Removing data directories...${NC}"
+    sudo rm -rf /var/lib/grafana
+    sudo rm -rf /var/lib/prometheus
+    sudo rm -rf /var/lib/loki
+    sudo rm -rf /var/lib/dcgm
+    
+    # 7. Xóa các thư mục log
+    echo -e "\n${YELLOW}Removing log directories...${NC}"
     sudo rm -rf /var/log/grafana
     sudo rm -rf /var/log/prometheus
     sudo rm -rf /var/log/node_exporter
     sudo rm -rf /var/log/loki
     sudo rm -rf /var/log/promtail
+    sudo rm -rf /var/log/dcgm
     
-    # 5. Update package list
+    # 8. Xóa các binary files
+    echo -e "\n${YELLOW}Removing binary files...${NC}"
+    sudo rm -f /usr/local/bin/prometheus
+    sudo rm -f /usr/local/bin/promtool
+    sudo rm -f /usr/local/bin/node_exporter
+    sudo rm -f /usr/local/bin/loki
+    sudo rm -f /usr/local/bin/promtail
+    sudo rm -f /usr/local/bin/nvidia_gpu_exporter
+    sudo rm -f /usr/bin/dcgm-exporter
+    
+    # 9. Xóa các service files
+    echo -e "\n${YELLOW}Removing service files...${NC}"
+    sudo rm -f /etc/systemd/system/prometheus.service
+    sudo rm -f /etc/systemd/system/node_exporter.service
+    sudo rm -f /etc/systemd/system/loki.service
+    sudo rm -f /etc/systemd/system/promtail.service
+    sudo rm -f /etc/systemd/system/dcgm-exporter.service
+    sudo rm -f /etc/systemd/system/nvidia-smi-exporter.service
+    
+    # 10. Xóa các user và group
+    echo -e "\n${YELLOW}Removing users and groups...${NC}"
+    sudo userdel -r prometheus 2>/dev/null || true
+    sudo userdel -r node_exporter 2>/dev/null || true
+    sudo userdel -r loki 2>/dev/null || true
+    sudo userdel -r grafana 2>/dev/null || true
+    sudo userdel -r nvidia-smi-exporter 2>/dev/null || true
+    
+    # 11. Reload systemd
+    echo -e "\n${YELLOW}Reloading systemd...${NC}"
+    sudo systemctl daemon-reload
+    sudo systemctl reset-failed
+    
+    # 12. Update package list
     echo -e "\n${YELLOW}Updating package list...${NC}"
     sudo apt-get update
     
-    # 6. Kiểm tra và thông báo
+    # 13. Kiểm tra và thông báo
     echo -e "\n${GREEN}=== Removal Summary ===${NC}"
-    echo -e "- All monitoring components have been removed"
-    echo -e "- All configuration files have been removed"
-    echo -e "- All data files have been removed"
-    echo -e "- All service files have been removed"
-    echo -e "- All users and groups have been removed"
-    echo -e "- All ports have been closed"
-    echo -e "- All repositories have been removed"
-    echo -e "\n${GREEN}Cleanup completed successfully!${NC}"
+    echo -e "- Tất cả các dịch vụ đã được dừng và vô hiệu hóa"
+    echo -e "- Tất cả các thành phần đã được gỡ bỏ"
+    echo -e "- Tất cả các gói phần mềm đã được xóa"
+    echo -e "- Tất cả các repository và GPG keys đã được xóa"
+    echo -e "- Tất cả các thư mục cấu hình đã được xóa"
+    echo -e "- Tất cả các thư mục dữ liệu đã được xóa"
+    echo -e "- Tất cả các thư mục log đã được xóa"
+    echo -e "- Tất cả các binary files đã được xóa"
+    echo -e "- Tất cả các service files đã được xóa"
+    echo -e "- Tất cả các user và group đã được xóa"
+    echo -e "- Tất cả các port đã được đóng"
+    echo -e "\n${GREEN}Quá trình dọn dẹp đã hoàn tất thành công!${NC}"
 }
 
 # Function to handle multiple selections
