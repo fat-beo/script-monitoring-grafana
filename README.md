@@ -39,6 +39,9 @@ Script này tự động hóa quá trình cài đặt các thành phần của G
 ### Installation
 
 ```bash
+# Remove old script if exists
+rm -f script-monitoring-grafana.sh*
+
 # Download script from GitHub
 wget https://raw.githubusercontent.com/fat-beo/script-monitoring-grafana/main/script-monitoring-grafana.sh
 
@@ -92,6 +95,9 @@ sudo ./script-monitoring-grafana.sh
 ### Cài đặt
 
 ```bash
+# Xóa script cũ nếu tồn tại
+rm -f script-monitoring-grafana.sh*
+
 # Tải script từ GitHub
 wget https://raw.githubusercontent.com/fat-beo/script-monitoring-grafana/main/script-monitoring-grafana.sh
 
