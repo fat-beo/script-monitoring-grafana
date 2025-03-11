@@ -558,40 +558,65 @@ remove_all_components() {
 handle_selections() {
     local selections=("$@")
     local success=true
+    local installed_components=()
     
     # Install selected components
     for selection in "${selections[@]}"; do
         case $selection in
             1)
-                install_grafana || success=false
+                if install_grafana; then
+                    installed_components+=("Grafana:$GRAFANA_PORT")
+                else
+                    success=false
+                fi
                 ;;
             2)
-                install_prometheus || success=false
+                if install_prometheus; then
+                    installed_components+=("Prometheus:$PROMETHEUS_PORT")
+                else
+                    success=false
+                fi
                 ;;
             3)
-                install_node_exporter || success=false
+                if install_node_exporter; then
+                    installed_components+=("Node Exporter:$NODE_EXPORTER_PORT")
+                else
+                    success=false
+                fi
                 ;;
             4)
-                install_promtail || success=false
+                if install_promtail; then
+                    installed_components+=("Promtail:$PROMTAIL_PORT")
+                else
+                    success=false
+                fi
                 ;;
             5)
-                install_loki || success=false
+                if install_loki; then
+                    installed_components+=("Loki:$LOKI_PORT")
+                else
+                    success=false
+                fi
                 ;;
             6)
-                install_nvidia_prometheus || success=false
+                if install_nvidia_prometheus; then
+                    installed_components+=("NVIDIA Exporter:$NVIDIA_EXPORTER_PORT")
+                else
+                    success=false
+                fi
                 ;;
         esac
     done
     
     if [ "$success" = true ]; then
         echo -e "${GREEN}All selected components have been installed successfully!${NC}"
-        echo -e "${GREEN}You can access the components at:${NC}"
-        echo -e "Grafana: http://0.0.0.0:$GRAFANA_PORT"
-        echo -e "Prometheus: http://0.0.0.0:$PROMETHEUS_PORT"
-        echo -e "Node Exporter: http://0.0.0.0:$NODE_EXPORTER_PORT"
-        echo -e "Promtail: http://0.0.0.0:$PROMTAIL_PORT"
-        echo -e "Loki: http://0.0.0.0:$LOKI_PORT"
-        echo -e "NVIDIA Exporter: http://0.0.0.0:$NVIDIA_EXPORTER_PORT"
+        if [ ${#installed_components[@]} -gt 0 ]; then
+            echo -e "${GREEN}You can access the installed components at:${NC}"
+            for component in "${installed_components[@]}"; do
+                IFS=':' read -r name port <<< "$component"
+                echo -e "$name: http://0.0.0.0:$port"
+            done
+        fi
     else
         echo -e "${RED}Some components failed to install. Please check the logs.${NC}"
     fi
@@ -617,7 +642,7 @@ else
     echo "6. NVIDIA Prometheus Exporter"
     echo "7. Configure Ports"
     echo "8. Remove All Components"
-    echo -e "\n${YELLOW}Enter the corresponding numbers separated by spaces (e.g., 2 3 4):${NC}"
+    echo -e "\n${YELLOW}Enter the corresponding numbers separated by spaces (e.g., 1 2 3 4...):${NC}"
     
     read -a selections
     
