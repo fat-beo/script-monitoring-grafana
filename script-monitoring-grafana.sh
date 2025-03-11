@@ -724,17 +724,36 @@ install_promtail() {
     # Cleanup old installation
     cleanup_component "promtail" $PROMTAIL_PORT
     
+    # Check and install unzip if not present
+    if ! command -v unzip &> /dev/null; then
+        echo -e "${YELLOW}Installing unzip...${NC}"
+        sudo apt-get update && sudo apt-get install -y unzip
+    fi
+    
     # Download config file first
     if ! download_configs "promtail"; then
         echo -e "${RED}Failed to download Promtail configuration. Installation aborted.${NC}"
         return 1
     fi
     
-    # Download Promtail
+    # Download and install Promtail
+    echo -e "\n${YELLOW}Downloading and installing Promtail...${NC}"
     LOKI_VERSION=$(curl -s https://api.github.com/repos/grafana/loki/releases/latest | grep tag_name | cut -d '"' -f 4)
     wget https://github.com/grafana/loki/releases/download/${LOKI_VERSION}/promtail-linux-amd64.zip
-    unzip promtail-linux-amd64.zip
+    
+    # Unzip with verbose output
+    unzip -o promtail-linux-amd64.zip
+    if [ ! -f "promtail-linux-amd64" ]; then
+        echo -e "${RED}Failed to extract Promtail binary${NC}"
+        return 1
+    fi
+    
+    # Move binary and set permissions
     sudo mv promtail-linux-amd64 /usr/local/bin/promtail
+    sudo chmod +x /usr/local/bin/promtail
+    
+    # Cleanup downloaded files
+    rm -f promtail-linux-amd64.zip
 
     # Create systemd service
     cat << EOF | sudo tee /etc/systemd/system/promtail.service
@@ -753,19 +772,25 @@ EOF
 
     # Start service
     sudo systemctl daemon-reload
-    sudo systemctl start promtail
     sudo systemctl enable promtail
+    sudo systemctl start promtail
     
     # Open port
     open_port $PROMTAIL_PORT
     
-    if sudo systemctl is-active --quiet promtail; then
-        echo -e "${GREEN}Promtail installed successfully!${NC}"
-        return 0
-    else
-        echo -e "${RED}Failed to install Promtail.${NC}"
+    # Verify installation
+    if [ ! -f "/usr/local/bin/promtail" ]; then
+        echo -e "${RED}Promtail binary not found in /usr/local/bin${NC}"
         return 1
     fi
+    
+    if ! systemctl is-active --quiet promtail; then
+        echo -e "${RED}Failed to start Promtail service${NC}"
+        return 1
+    fi
+    
+    echo -e "${GREEN}Promtail installed successfully!${NC}"
+    return 0
 }
 
 # Function to install Loki
@@ -775,17 +800,36 @@ install_loki() {
     # Cleanup old installation
     cleanup_component "loki" $LOKI_PORT
     
+    # Check and install unzip if not present
+    if ! command -v unzip &> /dev/null; then
+        echo -e "${YELLOW}Installing unzip...${NC}"
+        sudo apt-get update && sudo apt-get install -y unzip
+    fi
+    
     # Download config file first
     if ! download_configs "loki"; then
         echo -e "${RED}Failed to download Loki configuration. Installation aborted.${NC}"
         return 1
     fi
     
-    # Download Loki
+    # Download and install Loki
+    echo -e "\n${YELLOW}Downloading and installing Loki...${NC}"
     LOKI_VERSION=$(curl -s https://api.github.com/repos/grafana/loki/releases/latest | grep tag_name | cut -d '"' -f 4)
     wget https://github.com/grafana/loki/releases/download/${LOKI_VERSION}/loki-linux-amd64.zip
-    unzip loki-linux-amd64.zip
+    
+    # Unzip with verbose output
+    unzip -o loki-linux-amd64.zip
+    if [ ! -f "loki-linux-amd64" ]; then
+        echo -e "${RED}Failed to extract Loki binary${NC}"
+        return 1
+    fi
+    
+    # Move binary and set permissions
     sudo mv loki-linux-amd64 /usr/local/bin/loki
+    sudo chmod +x /usr/local/bin/loki
+    
+    # Cleanup downloaded files
+    rm -f loki-linux-amd64.zip
     
     # Create systemd service
     cat << EOF | sudo tee /etc/systemd/system/loki.service
@@ -804,19 +848,25 @@ EOF
 
     # Start service
     sudo systemctl daemon-reload
-    sudo systemctl start loki
     sudo systemctl enable loki
+    sudo systemctl start loki
     
     # Open port
     open_port $LOKI_PORT
     
-    if sudo systemctl is-active --quiet loki; then
-        echo -e "${GREEN}Loki installed successfully!${NC}"
-        return 0
-    else
-        echo -e "${RED}Failed to install Loki.${NC}"
+    # Verify installation
+    if [ ! -f "/usr/local/bin/loki" ]; then
+        echo -e "${RED}Loki binary not found in /usr/local/bin${NC}"
         return 1
     fi
+    
+    if ! systemctl is-active --quiet loki; then
+        echo -e "${RED}Failed to start Loki service${NC}"
+        return 1
+    fi
+    
+    echo -e "${GREEN}Loki installed successfully!${NC}"
+    return 0
 }
 
 # Function to install NVIDIA Prometheus Exporter
