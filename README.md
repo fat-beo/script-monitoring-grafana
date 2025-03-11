@@ -79,26 +79,21 @@ sudo ./script-monitoring-grafana.sh
   - Node Exporter: 9100
   - Promtail: 9080
   - Loki: 3100
-  - NVIDIA Exporter: 9400
+  - NVIDIA SMI Exporter: 9400
 - All services are configured to listen on 0.0.0.0 for external access
 - You can select multiple components by entering their numbers separated by spaces (e.g., `2 3 4`)
-- For NVIDIA Prometheus Exporter:
+- For NVIDIA SMI Exporter:
   - Requires NVIDIA drivers to be installed
-  - If installation fails with 404 error, manually install DCGM:
+  - If installation fails, check if nvidia-smi is available:
     ```bash
-    # Install NVIDIA repository
-    distribution=$(. /etc/os-release;echo $ID$VERSION_ID | sed -e 's/\.//g')
-    wget https://developer.download.nvidia.com/compute/cuda/repos/$distribution/x86_64/cuda-keyring_1.0-1_all.deb
-    sudo dpkg -i cuda-keyring_1.0-1_all.deb
-    sudo apt-get update
+    # Check NVIDIA driver installation
+    nvidia-smi
 
-    # Install DCGM
-    sudo apt-get install -y datacenter-gpu-manager
-
-    # Install DCGM Exporter
-    wget https://raw.githubusercontent.com/NVIDIA/dcgm-exporter/main/dcgm-exporter
-    chmod +x dcgm-exporter
-    sudo mv dcgm-exporter /usr/local/bin/
+    # Install NVIDIA SMI Exporter
+    wget https://github.com/utkuozdemir/nvidia_gpu_exporter/releases/download/v1.1.0/nvidia_gpu_exporter_1.1.0_linux_x86_64.tar.gz
+    tar xvf nvidia_gpu_exporter_1.1.0_linux_x86_64.tar.gz
+    sudo mv nvidia_gpu_exporter /usr/local/bin/
+    sudo chmod +x /usr/local/bin/nvidia_gpu_exporter
     ```
 
 ### Target Configuration Guide
@@ -272,26 +267,21 @@ sudo ./script-monitoring-grafana.sh
   - Node Exporter: 9100
   - Promtail: 9080
   - Loki: 3100
-  - NVIDIA Exporter: 9400
+  - NVIDIA SMI Exporter: 9400
 - Tất cả các dịch vụ được cấu hình để lắng nghe trên 0.0.0.0 để cho phép truy cập từ bên ngoài
 - Bạn có thể chọn nhiều thành phần bằng cách nhập số của chúng cách nhau bởi dấu cách (ví dụ: `2 3 4`)
-- Đối với NVIDIA Prometheus Exporter:
+- Đối với NVIDIA SMI Exporter:
   - Yêu cầu đã cài đặt driver NVIDIA
-  - Nếu cài đặt bị lỗi 404, cài đặt DCGM thủ công:
+  - Nếu cài đặt bị lỗi, kiểm tra nvidia-smi:
     ```bash
-    # Cài đặt repository NVIDIA
-    distribution=$(. /etc/os-release;echo $ID$VERSION_ID | sed -e 's/\.//g')
-    wget https://developer.download.nvidia.com/compute/cuda/repos/$distribution/x86_64/cuda-keyring_1.0-1_all.deb
-    sudo dpkg -i cuda-keyring_1.0-1_all.deb
-    sudo apt-get update
+    # Kiểm tra cài đặt driver NVIDIA
+    nvidia-smi
 
-    # Cài đặt DCGM
-    sudo apt-get install -y datacenter-gpu-manager
-
-    # Cài đặt DCGM Exporter
-    wget https://raw.githubusercontent.com/NVIDIA/dcgm-exporter/main/dcgm-exporter
-    chmod +x dcgm-exporter
-    sudo mv dcgm-exporter /usr/local/bin/
+    # Cài đặt NVIDIA SMI Exporter
+    wget https://github.com/utkuozdemir/nvidia_gpu_exporter/releases/download/v1.1.0/nvidia_gpu_exporter_1.1.0_linux_x86_64.tar.gz
+    tar xvf nvidia_gpu_exporter_1.1.0_linux_x86_64.tar.gz
+    sudo mv nvidia_gpu_exporter /usr/local/bin/
+    sudo chmod +x /usr/local/bin/nvidia_gpu_exporter
     ```
 
 ### Hướng dẫn cấu hình thêm target

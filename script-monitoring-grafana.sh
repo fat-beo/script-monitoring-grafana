@@ -199,14 +199,14 @@ configure_ports() {
     fi
     
     # Update NVIDIA Exporter configuration if installed
-    if [ -f "/etc/systemd/system/dcgm-exporter.service" ]; then
-        echo -e "${YELLOW}Restarting NVIDIA Exporter...${NC}"
-        sudo systemctl restart dcgm-exporter
+    if [ -f "/etc/systemd/system/nvidia-smi-exporter.service" ]; then
+        echo -e "${YELLOW}Restarting NVIDIA SMI Exporter...${NC}"
+        sudo systemctl restart nvidia-smi-exporter
         # Update firewall rules
         close_port $old_nvidia_exporter_port
         open_port $NVIDIA_EXPORTER_PORT
     else
-        echo -e "${YELLOW}NVIDIA Exporter is not installed. Port configuration will be applied when NVIDIA Exporter is installed.${NC}"
+        echo -e "${YELLOW}NVIDIA SMI Exporter is not installed. Port configuration will be applied when NVIDIA SMI Exporter is installed.${NC}"
     fi
     
     # Final systemd reload to ensure all changes are applied
@@ -836,7 +836,7 @@ EOF
 
 # Function to install NVIDIA Prometheus Exporter
 install_nvidia_prometheus() {
-    echo -e "${YELLOW}Installing NVIDIA Prometheus Exporter...${NC}"
+    echo -e "${YELLOW}Installing NVIDIA SMI Exporter...${NC}"
     
     # 1. Cleanup old installation
     echo -e "\n${YELLOW}Cleaning up old installation...${NC}"
@@ -844,30 +844,35 @@ install_nvidia_prometheus() {
     
     # 2. Check prerequisites
     echo -e "\n${YELLOW}Checking prerequisites...${NC}"
-    if ! command -v wget &> /dev/null; then
-        sudo apt-get install -y wget
+    if ! command -v nvidia-smi &> /dev/null; then
+        echo -e "${RED}NVIDIA driver is not installed. Please install NVIDIA driver first.${NC}"
+        return 1
     fi
     
-    # 3. Add NVIDIA repository
-    echo -e "\n${YELLOW}Adding NVIDIA repository...${NC}"
-    wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2204/x86_64/cuda-keyring_1.0-1_all.deb
-    sudo dpkg -i cuda-keyring_1.0-1_all.deb
-    sudo apt update
+    # 3. Create nvidia-smi-exporter user
+    echo -e "\n${YELLOW}Creating nvidia-smi-exporter user...${NC}"
+    sudo useradd --no-create-home --shell /bin/false nvidia-smi-exporter || true
     
-    # 4. Install DCGM
-    echo -e "\n${YELLOW}Installing DCGM...${NC}"
-    sudo apt-get install -y datacenter-gpu-manager
+    # 4. Download and install NVIDIA SMI Exporter
+    echo -e "\n${YELLOW}Downloading and installing NVIDIA SMI Exporter...${NC}"
+    wget https://github.com/utkuozdemir/nvidia_gpu_exporter/releases/download/v1.1.0/nvidia_gpu_exporter_1.1.0_linux_x86_64.tar.gz
+    tar xvf nvidia_gpu_exporter_1.1.0_linux_x86_64.tar.gz
+    sudo mv nvidia_gpu_exporter /usr/local/bin/
+    sudo chmod +x /usr/local/bin/nvidia_gpu_exporter
+    rm -f nvidia_gpu_exporter_1.1.0_linux_x86_64.tar.gz
     
-    # 5. Create systemd service for DCGM Exporter
-    echo -e "\n${YELLOW}Creating systemd service for DCGM Exporter...${NC}"
-    sudo tee /etc/systemd/system/dcgm-exporter.service > /dev/null << EOF
+    # 5. Create systemd service for NVIDIA SMI Exporter
+    echo -e "\n${YELLOW}Creating systemd service for NVIDIA SMI Exporter...${NC}"
+    sudo tee /etc/systemd/system/nvidia-smi-exporter.service > /dev/null << EOF
 [Unit]
-Description=NVIDIA DCGM Exporter
+Description=NVIDIA SMI Exporter
 After=network.target
 
 [Service]
+User=nvidia-smi-exporter
+Group=nvidia-smi-exporter
 Type=simple
-ExecStart=/usr/bin/dcgm-exporter --log-level=INFO --addr 0.0.0.0:${NVIDIA_EXPORTER_PORT}
+ExecStart=/usr/local/bin/nvidia_gpu_exporter --web.listen-address=:${NVIDIA_EXPORTER_PORT}
 Restart=always
 RestartSec=10
 
@@ -875,11 +880,11 @@ RestartSec=10
 WantedBy=multi-user.target
 EOF
     
-    # 6. Start and enable DCGM Exporter service
-    echo -e "\n${YELLOW}Starting and enabling DCGM Exporter service...${NC}"
+    # 6. Start and enable NVIDIA SMI Exporter service
+    echo -e "\n${YELLOW}Starting and enabling NVIDIA SMI Exporter service...${NC}"
     sudo systemctl daemon-reload
-    sudo systemctl enable dcgm-exporter
-    sudo systemctl start dcgm-exporter
+    sudo systemctl enable nvidia-smi-exporter
+    sudo systemctl start nvidia-smi-exporter
     
     # 7. Configure firewall
     echo -e "\n${YELLOW}Configuring firewall...${NC}"
@@ -898,12 +903,12 @@ EOF
     
     # 9. Check installation
     echo -e "\n${YELLOW}Checking installation...${NC}"
-    if systemctl is-active --quiet dcgm-exporter; then
-        echo -e "${GREEN}NVIDIA Prometheus Exporter has been installed successfully!${NC}"
+    if systemctl is-active --quiet nvidia-smi-exporter; then
+        echo -e "${GREEN}NVIDIA SMI Exporter has been installed successfully!${NC}"
         echo -e "Access metrics at: http://localhost:$NVIDIA_EXPORTER_PORT/metrics"
         return 0
     else
-        echo -e "${RED}Failed to install NVIDIA Prometheus Exporter. Please check the logs.${NC}"
+        echo -e "${RED}Failed to install NVIDIA SMI Exporter. Please check the logs.${NC}"
         return 1
     fi
 }
@@ -920,9 +925,7 @@ remove_all_components() {
         "node_exporter"
         "promtail"
         "loki"
-        "dcgm-exporter"
         "nvidia-smi-exporter"
-        "nvidia-dcgm"
     )
     
     for service in "${services[@]}"; do
@@ -1003,7 +1006,6 @@ remove_all_components() {
     sudo rm -f /etc/systemd/system/node_exporter.service
     sudo rm -f /etc/systemd/system/loki.service
     sudo rm -f /etc/systemd/system/promtail.service
-    sudo rm -f /etc/systemd/system/dcgm-exporter.service
     sudo rm -f /etc/systemd/system/nvidia-smi-exporter.service
     
     # 10. Xóa các user và group
@@ -1085,7 +1087,7 @@ handle_selections() {
                 ;;
             6)
                 if install_nvidia_prometheus; then
-                    installed_components+=("NVIDIA DCGM Exporter:$NVIDIA_EXPORTER_PORT")
+                    installed_components+=("NVIDIA SMI Exporter:$NVIDIA_EXPORTER_PORT")
                 else
                     success=false
                 fi
@@ -1134,7 +1136,7 @@ else
     echo "3. Node Exporter"
     echo "4. Promtail"
     echo "5. Loki"
-    echo "6. NVIDIA DCGM Exporter"
+    echo "6. NVIDIA SMI Exporter"
     echo "7. Configure Ports"
     echo "8. Remove All Components"
     echo -e "\n${YELLOW}Enter the corresponding numbers separated by spaces (e.g., 1 2 3 4...):${NC}"
