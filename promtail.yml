@@ -1,0 +1,20 @@
+server:
+  http_listen_address: 0.0.0.0
+  http_listen_port: ${PROMTAIL_PORT}
+  grpc_listen_port: 0
+
+positions:
+  filename: /tmp/positions.yaml
+
+clients:
+  - url: http://localhost:${LOKI_PORT}/loki/api/v1/push
+
+scrape_configs:
+  - job_name: system
+    static_configs:
+    - targets:
+        - localhost
+      labels:
+        job: varlogs
+        __path__: /var/log/*log
+        host: ${HOSTNAME} 
