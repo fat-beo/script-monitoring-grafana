@@ -873,7 +873,7 @@ After=network-online.target
 User=loki
 Group=loki
 Type=simple
-ExecStart=/usr/local/bin/loki -config.file=/etc/loki/config.yml
+ExecStart=/usr/local/bin/loki -config.file=/etc/loki/config.yml -config.expand-env=true
 WorkingDirectory=/var/lib/loki
 Restart=always
 RestartSec=10
