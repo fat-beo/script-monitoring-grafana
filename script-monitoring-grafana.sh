@@ -361,9 +361,6 @@ download_configs() {
     local component=$1
     echo -e "${YELLOW}Downloading configuration file for $component...${NC}"
     
-    # Create config directory if not exists
-    mkdir -p configs
-    
     # Define base URL for raw config files
     local base_url="https://raw.githubusercontent.com/fat-beo/script-monitoring-grafana/main"
     local config_file=""
@@ -388,15 +385,13 @@ download_configs() {
             ;;
     esac
     
-    # Try to download configuration file
-    if wget -q "$base_url/$config_file" -O "configs/$config_file"; then
+    # Create directory if it doesn't exist
+    sudo mkdir -p $(dirname $target_path)
+    
+    # Try to download configuration file directly to target path
+    echo -e "${YELLOW}Downloading from: $base_url/$config_file${NC}"
+    if sudo wget -q "$base_url/$config_file" -O "$target_path"; then
         echo -e "${GREEN}Configuration file for $component downloaded successfully!${NC}"
-        
-        # Create directory if it doesn't exist
-        sudo mkdir -p $(dirname $target_path)
-        
-        # Copy configuration file to target location
-        sudo cp "configs/$config_file" "$target_path"
         
         # Set correct permissions
         case $component in
@@ -417,12 +412,15 @@ download_configs() {
         export NVIDIA_EXPORTER_PORT
         export HOSTNAME=$(hostname)
         
-        envsubst < "configs/$config_file" | sudo tee "$target_path" > /dev/null
+        # Create temporary file for envsubst
+        local temp_file="${target_path}.tmp"
+        envsubst < "$target_path" | sudo tee "$temp_file" > /dev/null
+        sudo mv "$temp_file" "$target_path"
         
         echo -e "${GREEN}Configuration file installed at $target_path${NC}"
         return 0
     else
-        echo -e "${RED}Failed to download configuration file for $component.${NC}"
+        echo -e "${RED}Failed to download configuration file for $component from: $base_url/$config_file${NC}"
         return 1
     fi
 }
