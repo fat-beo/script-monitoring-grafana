@@ -470,6 +470,54 @@ add_prometheus_job() {
     fi
 }
 
+# Function to configure Grafana password
+configure_grafana_password() {
+    local password=""
+    local confirm_password=""
+    local max_attempts=3
+    local attempt=1
+
+    while [ $attempt -le $max_attempts ]; do
+        echo -e "${YELLOW}Set Grafana admin password (attempt $attempt of $max_attempts):${NC}"
+        read -s -p "Enter password: " password
+        echo
+        read -s -p "Confirm password: " confirm_password
+        echo
+
+        if [ "$password" = "$confirm_password" ]; then
+            if [ ${#password} -lt 8 ]; then
+                echo -e "${RED}Password must be at least 8 characters long.${NC}"
+                attempt=$((attempt + 1))
+                continue
+            fi
+            break
+        else
+            echo -e "${RED}Passwords do not match.${NC}"
+            attempt=$((attempt + 1))
+        fi
+
+        if [ $attempt -gt $max_attempts ]; then
+            echo -e "${RED}Maximum password attempts reached. Using default password: admin${NC}"
+            password="admin"
+            break
+        fi
+    done
+
+    # Update Grafana configuration with new password
+    if [ -f "/etc/grafana/grafana.ini" ]; then
+        echo -e "${YELLOW}Updating Grafana admin password...${NC}"
+        sudo grafana-cli admin reset-admin-password "$password"
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}Grafana admin password updated successfully!${NC}"
+            echo -e "${YELLOW}Remember your credentials:${NC}"
+            echo -e "Username: admin"
+            echo -e "Password: $password"
+        else
+            echo -e "${RED}Failed to update Grafana admin password.${NC}"
+        fi
+    fi
+}
+
 # Function to install Grafana
 install_grafana() {
     echo -e "${YELLOW}Installing Grafana...${NC}"
@@ -477,11 +525,68 @@ install_grafana() {
     # Cleanup old installation
     cleanup_component "grafana" $GRAFANA_PORT
     
+    # Prompt for admin password
+    local password=""
+    local confirm_password=""
+    local max_attempts=3
+    local attempt=1
+    
+    while [ $attempt -le $max_attempts ]; do
+        echo -e "${YELLOW}Set Grafana admin password (attempt $attempt of $max_attempts):${NC}"
+        read -s -p "Enter password (minimum 8 characters): " password
+        echo
+        read -s -p "Confirm password: " confirm_password
+        echo
+        
+        if [ "$password" = "$confirm_password" ]; then
+            if [ ${#password} -lt 8 ]; then
+                echo -e "${RED}Password must be at least 8 characters long.${NC}"
+                attempt=$((attempt + 1))
+                continue
+            fi
+            break
+        else
+            echo -e "${RED}Passwords do not match.${NC}"
+            attempt=$((attempt + 1))
+        fi
+        
+        if [ $attempt -gt $max_attempts ]; then
+            echo -e "${RED}Maximum password attempts reached. Using default password: admin${NC}"
+            password="admin"
+            break
+        fi
+    done
+    
+    # Create temporary grafana.ini with the new password
+    cat << EOF > /tmp/grafana.ini
+[server]
+http_addr = 0.0.0.0
+http_port = ${GRAFANA_PORT}
+
+[security]
+admin_user = admin
+admin_password = ${password}
+
+[log]
+mode = console file
+level = info
+EOF
+    
     # Download config file first
-    if ! download_configs "grafana"; then
-        echo -e "${RED}Failed to download Grafana configuration. Installation aborted.${NC}"
+    if ! sudo mkdir -p /etc/grafana; then
+        echo -e "${RED}Failed to create Grafana config directory. Installation aborted.${NC}"
         return 1
     fi
+    
+    # Move the temporary config file
+    if ! sudo mv /tmp/grafana.ini /etc/grafana/grafana.ini; then
+        echo -e "${RED}Failed to move Grafana configuration. Installation aborted.${NC}"
+        return 1
+    fi
+    
+    # Set correct permissions
+    sudo chown grafana:grafana /etc/grafana/grafana.ini
+    sudo chmod 640 /etc/grafana/grafana.ini
     
     # Add Grafana GPG key
     wget -q -O - https://packages.grafana.com/gpg.key | sudo apt-key add -
@@ -494,12 +599,21 @@ install_grafana() {
     
     # Install Grafana
     if sudo apt install grafana -y; then
-        sudo systemctl restart grafana-server
+        # Start Grafana service
+        sudo systemctl start grafana-server
+        sudo systemctl enable grafana-server
+        
+        # Wait for Grafana to start
+        echo -e "${YELLOW}Waiting for Grafana to start...${NC}"
+        sleep 10
         
         # Open port
         open_port $GRAFANA_PORT
         
         echo -e "${GREEN}Grafana installed successfully!${NC}"
+        echo -e "${YELLOW}You can access Grafana at: http://0.0.0.0:$GRAFANA_PORT${NC}"
+        echo -e "${YELLOW}Username: admin${NC}"
+        echo -e "${YELLOW}Password: $password${NC}"
         return 0
     else
         echo -e "${RED}Failed to install Grafana.${NC}"
