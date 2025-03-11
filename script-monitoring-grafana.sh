@@ -18,20 +18,31 @@ NVIDIA_EXPORTER_PORT=9400
 check_for_updates() {
     echo -e "${YELLOW}Checking for script updates...${NC}"
     TMP_SCRIPT="/tmp/script-monitoring-grafana.sh"
+    CURRENT_SCRIPT="$0"
     
     # Download the latest version
     if wget -q https://raw.githubusercontent.com/yourusername/script-monitoring-grafana/main/script-monitoring-grafana.sh -O $TMP_SCRIPT; then
         # Compare with current version
-        if ! cmp -s "$0" "$TMP_SCRIPT"; then
+        if ! cmp -s "$CURRENT_SCRIPT" "$TMP_SCRIPT"; then
             echo -e "${GREEN}New version found! Updating script...${NC}"
-            cp "$TMP_SCRIPT" "$0"
-            chmod +x "$0"
-            echo -e "${GREEN}Script updated successfully! Please run the script again.${NC}"
-            rm "$TMP_SCRIPT"
+            
+            # Backup current script
+            BACKUP_SCRIPT="${CURRENT_SCRIPT}.backup"
+            cp "$CURRENT_SCRIPT" "$BACKUP_SCRIPT"
+            
+            # Remove old script and copy new one
+            rm -f "$CURRENT_SCRIPT"
+            cp "$TMP_SCRIPT" "$CURRENT_SCRIPT"
+            chmod +x "$CURRENT_SCRIPT"
+            
+            echo -e "${GREEN}Script updated successfully!${NC}"
+            echo -e "${YELLOW}Backup of old script saved as: $BACKUP_SCRIPT${NC}"
+            echo -e "${GREEN}Please run the script again.${NC}"
+            rm -f "$TMP_SCRIPT"
             exit 0
         else
             echo -e "${GREEN}Script is up to date.${NC}"
-            rm "$TMP_SCRIPT"
+            rm -f "$TMP_SCRIPT"
         fi
     else
         echo -e "${RED}Failed to check for updates. Continuing with current version...${NC}"
@@ -53,6 +64,15 @@ print_sign() {
 # Function to configure ports
 configure_ports() {
     echo -e "${YELLOW}Configure ports for components:${NC}"
+    
+    # Store old ports
+    local old_grafana_port=$GRAFANA_PORT
+    local old_prometheus_port=$PROMETHEUS_PORT
+    local old_node_exporter_port=$NODE_EXPORTER_PORT
+    local old_promtail_port=$PROMTAIL_PORT
+    local old_loki_port=$LOKI_PORT
+    local old_nvidia_exporter_port=$NVIDIA_EXPORTER_PORT
+    
     read -p "Grafana port (default: $GRAFANA_PORT): " input
     GRAFANA_PORT=${input:-$GRAFANA_PORT}
     
@@ -76,6 +96,9 @@ configure_ports() {
         echo -e "${YELLOW}Updating Grafana configuration...${NC}"
         sudo sed -i "s/http_port = .*/http_port = $GRAFANA_PORT/" /etc/grafana/grafana.ini
         sudo systemctl restart grafana-server
+        # Update firewall rules
+        close_port $old_grafana_port
+        open_port $GRAFANA_PORT
     fi
     
     # Update Prometheus configuration if installed
@@ -96,6 +119,9 @@ configure_ports() {
         fi
         
         sudo systemctl restart prometheus
+        # Update firewall rules
+        close_port $old_prometheus_port
+        open_port $PROMETHEUS_PORT
     fi
     
     # Update Node Exporter configuration if installed
@@ -103,6 +129,9 @@ configure_ports() {
         echo -e "${YELLOW}Updating Node Exporter configuration...${NC}"
         sudo sed -i "s/--web.listen-address=0.0.0.0:.*/--web.listen-address=0.0.0.0:$NODE_EXPORTER_PORT/" /etc/systemd/system/node_exporter.service
         sudo systemctl restart node_exporter
+        # Update firewall rules
+        close_port $old_node_exporter_port
+        open_port $NODE_EXPORTER_PORT
     fi
     
     # Update Promtail configuration if installed
@@ -111,6 +140,9 @@ configure_ports() {
         sudo sed -i "s/http_listen_port: .*/http_listen_port: $PROMTAIL_PORT/" /etc/promtail/config.yml
         sudo sed -i "s|url: http://0.0.0.0:.*/loki/api/v1/push|url: http://0.0.0.0:$LOKI_PORT/loki/api/v1/push|" /etc/promtail/config.yml
         sudo systemctl restart promtail
+        # Update firewall rules
+        close_port $old_promtail_port
+        open_port $PROMTAIL_PORT
     fi
     
     # Update Loki configuration if installed
@@ -118,6 +150,9 @@ configure_ports() {
         echo -e "${YELLOW}Updating Loki configuration...${NC}"
         sudo sed -i "s/http_listen_port: .*/http_listen_port: $LOKI_PORT/" /etc/loki/config.yml
         sudo systemctl restart loki
+        # Update firewall rules
+        close_port $old_loki_port
+        open_port $LOKI_PORT
     fi
     
     # Update NVIDIA Exporter configuration if installed
@@ -125,9 +160,34 @@ configure_ports() {
         echo -e "${YELLOW}Updating NVIDIA Exporter configuration...${NC}"
         sudo sed -i "s/--address=0.0.0.0:.*/--address=0.0.0.0:$NVIDIA_EXPORTER_PORT/" /etc/systemd/system/dcgm-exporter.service
         sudo systemctl restart dcgm-exporter
+        # Update firewall rules
+        close_port $old_nvidia_exporter_port
+        open_port $NVIDIA_EXPORTER_PORT
     fi
     
     echo -e "${GREEN}Ports configured successfully!${NC}"
+}
+
+# Function to open port
+open_port() {
+    local port=$1
+    echo -e "${YELLOW}Opening port $port...${NC}"
+    if command -v ufw &> /dev/null; then
+        sudo ufw allow $port/tcp
+    elif command -v iptables &> /dev/null; then
+        sudo iptables -A INPUT -p tcp --dport $port -j ACCEPT
+    fi
+}
+
+# Function to close port
+close_port() {
+    local port=$1
+    echo -e "${YELLOW}Closing port $port...${NC}"
+    if command -v ufw &> /dev/null; then
+        sudo ufw delete allow $port/tcp
+    elif command -v iptables &> /dev/null; then
+        sudo iptables -D INPUT -p tcp --dport $port -j ACCEPT
+    fi
 }
 
 # Function to install Grafana
@@ -149,6 +209,9 @@ install_grafana() {
         sudo sed -i "s/;http_port = 3000/http_port = $GRAFANA_PORT/" /etc/grafana/grafana.ini
         sudo sed -i "s/;http_addr = /http_addr = 0.0.0.0/" /etc/grafana/grafana.ini
         sudo systemctl restart grafana-server
+        
+        # Open port
+        open_port $GRAFANA_PORT
         
         echo -e "${GREEN}Grafana installed successfully!${NC}"
         return 0
@@ -225,6 +288,9 @@ EOF
     sudo systemctl start prometheus
     sudo systemctl enable prometheus
     
+    # Open port
+    open_port $PROMETHEUS_PORT
+    
     if sudo systemctl is-active --quiet prometheus; then
         echo -e "${GREEN}Prometheus installed successfully!${NC}"
         return 0
@@ -275,6 +341,9 @@ EOF
     # Add to Prometheus config
     sudo sed -i '/scrape_configs:/a\  - job_name: '\''node'\''\n    static_configs:\n      - targets: ['\''0.0.0.0:'$NODE_EXPORTER_PORT'\'']' /etc/prometheus/prometheus.yml
     sudo systemctl restart prometheus
+    
+    # Open port
+    open_port $NODE_EXPORTER_PORT
     
     if sudo systemctl is-active --quiet node_exporter; then
         echo -e "${GREEN}Node Exporter installed successfully!${NC}"
@@ -340,6 +409,9 @@ EOF
     sudo systemctl daemon-reload
     sudo systemctl start promtail
     sudo systemctl enable promtail
+    
+    # Open port
+    open_port $PROMTAIL_PORT
     
     if sudo systemctl is-active --quiet promtail; then
         echo -e "${GREEN}Promtail installed successfully!${NC}"
@@ -425,6 +497,9 @@ EOF
     sudo systemctl start loki
     sudo systemctl enable loki
     
+    # Open port
+    open_port $LOKI_PORT
+    
     if sudo systemctl is-active --quiet loki; then
         echo -e "${GREEN}Loki installed successfully!${NC}"
         return 0
@@ -473,6 +548,9 @@ EOF
     sudo sed -i '/scrape_configs:/a\  - job_name: '\''nvidia_gpu'\''\n    static_configs:\n      - targets: ['\''0.0.0.0:'$NVIDIA_EXPORTER_PORT'\'']' /etc/prometheus/prometheus.yml
     sudo systemctl restart prometheus
     
+    # Open port
+    open_port $NVIDIA_EXPORTER_PORT
+    
     if sudo systemctl is-active --quiet dcgm-exporter; then
         echo -e "${GREEN}NVIDIA Prometheus Exporter installed successfully!${NC}"
         return 0
@@ -504,6 +582,7 @@ remove_all_components() {
         sudo apt-get remove --purge grafana -y
         sudo rm -rf /etc/grafana
         sudo rm -rf /var/lib/grafana
+        close_port $GRAFANA_PORT
     fi
 
     # Remove Prometheus
@@ -514,6 +593,7 @@ remove_all_components() {
         sudo rm -f /usr/local/bin/prometheus
         sudo rm -f /usr/local/bin/promtool
         sudo userdel prometheus
+        close_port $PROMETHEUS_PORT
     fi
 
     # Remove Node Exporter
@@ -521,6 +601,7 @@ remove_all_components() {
         echo -e "Removing Node Exporter..."
         sudo rm -f /usr/local/bin/node_exporter
         sudo userdel node_exporter
+        close_port $NODE_EXPORTER_PORT
     fi
 
     # Remove Promtail
@@ -528,6 +609,7 @@ remove_all_components() {
         echo -e "Removing Promtail..."
         sudo rm -rf /etc/promtail
         sudo rm -f /usr/local/bin/promtail
+        close_port $PROMTAIL_PORT
     fi
 
     # Remove Loki
@@ -536,12 +618,14 @@ remove_all_components() {
         sudo rm -rf /etc/loki
         sudo rm -f /usr/local/bin/loki
         sudo rm -rf /tmp/loki
+        close_port $LOKI_PORT
     fi
 
     # Remove NVIDIA DCGM Exporter
     if [ -f "/usr/local/bin/dcgm-exporter" ]; then
         echo -e "Removing NVIDIA DCGM Exporter..."
         sudo rm -f /usr/local/bin/dcgm-exporter
+        close_port $NVIDIA_EXPORTER_PORT
     fi
 
     # Reload systemd
