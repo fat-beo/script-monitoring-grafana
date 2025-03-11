@@ -873,59 +873,57 @@ install_nvidia_prometheus() {
     # Install DCGM first
     echo -e "${YELLOW}Installing NVIDIA DCGM...${NC}"
     
-    # Add NVIDIA repository
-    distribution=$(. /etc/os-release;echo $ID$VERSION_ID)
-    curl -s -L https://nvidia.github.io/nvidia-docker/gpgkey | sudo apt-key add -
-    curl -s -L https://nvidia.github.io/nvidia-docker/$distribution/nvidia-docker.list | sudo tee /etc/apt/sources.list.d/nvidia-docker.list
+    # Add NVIDIA Container Toolkit repository
+    curl -fsSL https://nvidia.github.io/libnvidia-container/gpgkey | sudo gpg --dearmor -o /usr/share/keyrings/nvidia-container-toolkit-keyring.gpg
+    curl -s -L https://nvidia.github.io/libnvidia-container/stable/deb/nvidia-container-toolkit.list | \
+        sed 's#deb https://#deb [signed-by=/usr/share/keyrings/nvidia-container-toolkit-keyring.gpg] https://#g' | \
+        sudo tee /etc/apt/sources.list.d/nvidia-container-toolkit.list
     
-    # Add DCGM repository
-    curl -s -L https://nvidia.github.io/datacenter-gpu-manager/ubuntu20.04/datacenter-gpu-manager.list | sudo tee /etc/apt/sources.list.d/datacenter-gpu-manager.list
-    
-    # Update package list
+    # Update package list and install DCGM
     sudo apt-get update
-    
-    # Install DCGM
     if ! sudo apt-get install -y datacenter-gpu-manager; then
-        echo -e "${RED}Failed to install DCGM. Trying alternative installation method...${NC}"
-        
-        # Try installing from NVIDIA repository directly
-        wget https://developer.download.nvidia.com/compute/cuda/repos/ubuntu2004/x86_64/datacenter-gpu-manager_2.2.7_amd64.deb
-        if [ -f "datacenter-gpu-manager_2.2.7_amd64.deb" ]; then
-            sudo dpkg -i datacenter-gpu-manager_2.2.7_amd64.deb
-            sudo apt-get install -f -y
-            rm datacenter-gpu-manager_2.2.7_amd64.deb
-        else
-            echo -e "${RED}Failed to download DCGM package. Installation aborted.${NC}"
-            return 1
-        fi
+        echo -e "${RED}Failed to install DCGM. Installation aborted.${NC}"
+        return 1
+    fi
+
+    # Create DCGM service file if it doesn't exist
+    if [ ! -f "/etc/systemd/system/nvidia-dcgm.service" ]; then
+        cat << EOF | sudo tee /etc/systemd/system/nvidia-dcgm.service
+[Unit]
+Description=NVIDIA Data Center GPU Manager
+After=syslog.target network.target
+
+[Service]
+Type=forking
+ExecStart=/usr/bin/nv-hostengine -b
+ExecStopPost=/usr/bin/nv-hostengine -t
+Restart=on-abort
+
+[Install]
+WantedBy=multi-user.target
+EOF
     fi
 
     # Start DCGM service
-    if [ -f "/etc/systemd/system/nvidia-dcgm.service" ]; then
-        sudo systemctl --now enable nvidia-dcgm
-        sudo systemctl start nvidia-dcgm
-    else
-        echo -e "${RED}DCGM service file not found. Installation may have failed.${NC}"
-        return 1
-    fi
+    sudo systemctl daemon-reload
+    sudo systemctl enable nvidia-dcgm
+    sudo systemctl start nvidia-dcgm
 
     # Wait for DCGM to start
     echo -e "${YELLOW}Waiting for DCGM to start...${NC}"
-    sleep 5
+    sleep 10
     
     # Download DCGM Exporter
     echo -e "${YELLOW}Downloading DCGM Exporter...${NC}"
-    DCGM_VERSION=$(curl -s https://api.github.com/repos/NVIDIA/dcgm-exporter/releases/latest | grep tag_name | cut -d '"' -f 4)
-    if [ -n "$DCGM_VERSION" ]; then
-        wget -q https://github.com/NVIDIA/dcgm-exporter/releases/download/${DCGM_VERSION}/dcgm-exporter
-    else
-        echo -e "${RED}Failed to determine latest DCGM Exporter version.${NC}"
-        return 1
-    fi
-
+    wget https://raw.githubusercontent.com/NVIDIA/dcgm-exporter/main/dcgm-exporter
+    
     if [ ! -f "dcgm-exporter" ]; then
-        echo -e "${RED}Failed to download DCGM Exporter.${NC}"
-        return 1
+        echo -e "${RED}Failed to download DCGM Exporter. Trying alternative download...${NC}"
+        wget https://github.com/NVIDIA/dcgm-exporter/releases/download/3.1.7/dcgm-exporter
+        if [ ! -f "dcgm-exporter" ]; then
+            echo -e "${RED}Failed to download DCGM Exporter.${NC}"
+            return 1
+        fi
     fi
 
     chmod +x dcgm-exporter
