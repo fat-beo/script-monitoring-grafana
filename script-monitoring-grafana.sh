@@ -1085,7 +1085,34 @@ handle_selections() {
     if [ "$success" = true ]; then
         echo -e "${GREEN}All selected components have been installed successfully!${NC}"
         if [ ${#installed_components[@]} -gt 0 ]; then
-            echo -e "${GREEN}You can access the installed components at:${NC}"
+            echo -e "\033[1;33mKiểm tra trạng thái các service:\033[0m"
+            
+            # Kiểm tra từng service
+            if systemctl list-unit-files | grep -q "grafana-server"; then
+                echo -e "\n\033[1;32m=== Grafana ===\033[0m" && systemctl status grafana-server | grep -E "Active:|●"
+            fi
+            
+            if systemctl list-unit-files | grep -q "prometheus"; then
+                echo -e "\n\033[1;32m=== Prometheus ===\033[0m" && systemctl status prometheus | grep -E "Active:|●"
+            fi
+            
+            if systemctl list-unit-files | grep -q "node_exporter"; then
+                echo -e "\n\033[1;32m=== Node Exporter ===\033[0m" && systemctl status node_exporter | grep -E "Active:|●"
+            fi
+            
+            if systemctl list-unit-files | grep -q "promtail"; then
+                echo -e "\n\033[1;32m=== Promtail ===\033[0m" && systemctl status promtail | grep -E "Active:|●"
+            fi
+            
+            if systemctl list-unit-files | grep -q "loki"; then
+                echo -e "\n\033[1;32m=== Loki ===\033[0m" && systemctl status loki | grep -E "Active:|●"
+            fi
+            
+            if systemctl list-unit-files | grep -q "nvidia-smi-exporter"; then
+                echo -e "\n\033[1;32m=== NVIDIA SMI Exporter ===\033[0m" && systemctl status nvidia-smi-exporter | grep -E "Active:|●"
+            fi
+            
+            echo -e "\n${GREEN}You can access the installed components at:${NC}"
             for component in "${installed_components[@]}"; do
                 IFS=':' read -r name port <<< "$component"
                 echo -e "$name: http://0.0.0.0:$port"
