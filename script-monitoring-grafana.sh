@@ -976,7 +976,6 @@ remove_all_components() {
     sudo rm -f /usr/local/bin/loki
     sudo rm -f /usr/local/bin/promtail
     sudo rm -f /usr/local/bin/nvidia_gpu_exporter
-    sudo rm -f /usr/bin/dcgm-exporter
     
     # 9. Xóa các service files
     echo -e "\n${YELLOW}Removing service files...${NC}"
