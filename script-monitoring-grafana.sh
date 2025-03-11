@@ -469,18 +469,19 @@ install_prometheus() {
     # Cleanup old installation
     cleanup_component "prometheus" $PROMETHEUS_PORT
     
+    # Create prometheus user and group first
+    sudo groupadd --system prometheus || true
+    sudo useradd --system --no-create-home --shell /bin/false -g prometheus prometheus || true
+    
+    # Create directories
+    sudo mkdir -p /etc/prometheus
+    sudo mkdir -p /var/lib/prometheus
+    
     # Download config file first
     if ! download_configs "prometheus"; then
         echo -e "${RED}Failed to download Prometheus configuration. Installation aborted.${NC}"
         return 1
     fi
-    
-    # Create prometheus user
-    sudo useradd --no-create-home --shell /bin/false prometheus
-    
-    # Create directories
-    sudo mkdir -p /etc/prometheus
-    sudo mkdir -p /var/lib/prometheus
     
     # Download Prometheus
     PROMETHEUS_VERSION=$(curl -s https://api.github.com/repos/prometheus/prometheus/releases/latest | grep tag_name | cut -d '"' -f 4)
