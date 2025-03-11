@@ -810,7 +810,9 @@ install_loki() {
     sudo mkdir -p /etc/loki
     sudo mkdir -p /var/lib/loki
     sudo mkdir -p /tmp/loki/{index,chunks,rules,rules-temp,compactor,boltdb-cache}
+    sudo mkdir -p /tmp/loki/tsdb-shipper-cache
     sudo chown -R loki:loki /tmp/loki
+    sudo chmod -R 755 /tmp/loki
     
     # Download config file first
     if ! download_configs "loki"; then
